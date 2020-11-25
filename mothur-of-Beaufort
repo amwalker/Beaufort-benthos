@@ -1,0 +1,154 @@
+#I created my own .files file because my sample naming scheme doesn't work well with make.files
+
+nano contigs_summ
+
+#!/bin/bash
+
+#SBATCH --partition=analysis
+#SBATCH --mem=214G
+#SBATCH -n 1
+#SBATCH --mail-user=amwalker8@alaska.edu
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --chdir=/mothur_1.43/beau
+
+module load bio/Mothur/1.40.0-pic-intel-2016b-Python-3.5.2
+
+mothur "#make.contigs(file=beau.files, processors=8)"
+
+mothur "#summary.seqs(fasta=beau.trim.contigs.fasta, processors=8)"
+
+nano screen1_count
+
+#!/bin/bash
+
+#SBATCH --partition=analysis
+#SBATCH --mem=214G
+#SBATCH -n 1
+#SBATCH --mail-user=amwalker8@alaska.edu
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --chdir=/mothur_1.43/beau
+
+module load bio/Mothur/1.40.0-pic-intel-2016b-Python-3.5.2
+
+mothur "#screen.seqs(fasta=beau.trim.contigs.fasta, group=beau.contigs.groups, summary=beau.trim.contigs.summary, maxambig=0, maxlength=315)"
+mothur "#summary.seqs(fasta=beau.trim.contigs.good.fasta, processors=8)"
+mothur "#unique.seqs(fasta=beau.trim.contigs.good.fasta)"
+mothur "#count.seqs(name=beau.trim.contigs.good.names, group=beau.contigs.good.groups)"
+
+nano pcr_seqs
+#!/bin/bash
+
+#SBATCH --partition=analysis
+#SBATCH --mem=214G
+#SBATCH -n 1
+#SBATCH --mail-user=amwalker8@alaska.edu
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --chdir=/mothur_1.43/beau
+
+module load bio/Mothur/1.40.0-pic-intel-2016b-Python-3.5.2
+
+mothur "#summary.seqs(count=beau.trim.contigs.good.count_table, fasta=beau.trim.contigs.good.unique.fasta)"
+mothur "#pcr.seqs(fasta=silva.nr_v132.align, oligos=pcrseq.oligos)"
+mothur "#summary.seqs(fasta=silva.nr_v132.pcr.align, processors=8)"
+mothur "#pcr.seqs(fasta=silva.nr_v132.align, start=13262, end=23444, keepdots=F, processors=8)"
+mothur "#summary.seqs(fasta=silva.nr_v132.pcr.align, processors=8"
+
+nano align_screen2
+#!/bin/bash
+
+#SBATCH --partition=analysis
+#SBATCH --mem=214G
+#SBATCH -n 1
+#SBATCH --mail-user=amwalker8@alaska.edu
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --chdir=/mothur_1.43/beau
+
+module load bio/Mothur/1.40.0-pic-intel-2016b-Python-3.5.2
+
+mothur "#align.seqs(fasta=beau.trim.contigs.good.unique.fasta, reference=silva.nr_v132.pcr.align, flip=T, processors=8)"
+mothur "#summary.seqs(fasta=beau.trim.contigs.good.unique.align, count=beau.trim.contigs.good.count_table)"
+mothur "#screen.seqs(fasta=beau.trim.contigs.good.unique.align, count=beau.trim.contigs.good.count_table, summary=beau.trim.contigs.good.unique.summary, start=8, end=9582, maxhomop=8)"
+mothur "#summary.seqs(fasta=beau.trim.contigs.good.unique.good.align, count=beau.trim.contigs.good.good.count_table)"
+
+nano filter_chimera
+
+#!/bin/bash
+
+#SBATCH --partition=analysis
+#SBATCH --mem=214G
+#SBATCH -n 1
+#SBATCH --mail-user=amwalker8@alaska.edu
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --chdir=/mothur_1.43/beau
+
+module load bio/Mothur/1.40.0-pic-intel-2016b-Python-3.5.2
+
+mothur "#filter.seqs(fasta=beau.trim.contigs.good.unique.good.align, vertical=T, trump=.)"
+mothur "#unique.seqs(fasta=beau.trim.contigs.good.unique.good.filter.fasta, count=beau.trim.contigs.good.good.count_table)"
+mothur "#pre.cluster(fasta=beau.trim.contigs.good.unique.good.filter.unique.fasta, count=beau.trim.contigs.good.unique.good.filter.count_table, diffs=2, processors=8)"
+mothur "#chimera.vsearch(fasta=beau.trim.contigs.good.unique.good.filter.unique.precluster.fasta, count=beau.trim.contigs.good.unique.good.filter.unique.precluster.count_table, dereplicate=t)"
+
+nano remove_classify
+#!/bin/bash
+
+#SBATCH --partition=analysis
+#SBATCH --mem=214G
+#SBATCH -n 1
+#SBATCH --mail-user=amwalker8@alaska.edu
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --chdir=/mothur_1.43/beau
+
+module load bio/Mothur/1.40.0-pic-intel-2016b-Python-3.5.2
+
+mothur "#remove.seqs(fasta=beau.trim.contigs.good.unique.good.filter.unique.precluster.fasta, accnos=beau.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.accnos)"
+mothur "#summary.seqs(fasta=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta, count=beau.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.count_table, processors=8)"
+mothur "#classify.seqs(fasta=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta, count=beau.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.count_table, reference=silva.nr_v132.pcr.align, taxonomy=silva.nr_v132.tax, cutoff=80, processors=8)"
+mothur "#remove.lineage(fasta=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta, count=beau.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.count_table, taxonomy=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v132.wang.taxonomy, taxon=Chloroplast-Mitochondria-Eukaryota)"
+mothur "#summary.tax(taxonomy=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v132.wang.pick.taxonomy, count=beau.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.pick.count_table)"
+
+nano dist_count
+
+#!/bin/bash
+
+#SBATCH --partition=analysis
+#SBATCH --mem=214G
+#SBATCH -n 1
+#SBATCH --mail-user=amwalker8@alaska.edu
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --chdir=/mothur_1.43/beau
+
+module load bio/Mothur/1.40.0-pic-intel-2016b-Python-3.5.2
+mothur "#dist.seqs(fasta=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.fasta, cutoff=0.20, processors=14)"
+mothur "#cluster(column=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.dist, count=beau.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.pick.count_table, cutoff=0.00, method=opti)"
+mothur "#classify.otu(list=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.list, count=beau.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.pick.count_table, taxonomy=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v132.wang.pick.taxonomy, cutoff=80, relabund=T)"
+mothur "#get.oturep(fasta=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.fasta, count=beau.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.pick.count_table, list=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.list, method=abundance)"
+mothur "#make.shared(list=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.list, count=beau.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.pick.count_table, label=0.00)"
+mothur "#count.groups(shared=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.shared)"
+
+
+nano subsamp_rename
+
+#!/bin/bash
+
+#SBATCH --partition=analysis
+#SBATCH --mem=214G
+#SBATCH -n 1
+#SBATCH --mail-user=amwalker8@alaska.edu
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --chdir=/mothur_1.43/beau
+
+module load bio/Mothur/1.40.0-pic-intel-2016b-Python-3.5.2
+
+mothur "#sub.sample(shared=beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.shared, size=30000)"
+
+#in bash
+mv beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.0.subsample.shared beau_OTU_table.txt
+mv beau.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.0.cons.taxonomy    beau_tax_table.txt
