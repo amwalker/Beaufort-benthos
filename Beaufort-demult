@@ -1,0 +1,48 @@
+#in bash
+mv Plate-1-16s-15161_S1_L001_R1_001.fastq.gz Beau_P1_R1.fastq.gz
+mv Plate-1-16s-15161_S1_L001_R2_001.fastq.gz Beau_P1_R2.fastq.gz
+
+
+gunzip *fastq.gz
+module load lang/Python/2.7.12-pic-intel-2016b
+
+#how many sequences per file
+echo $(cat Beau_P1_R1.fastq | wc -l) / 4 | bc &
+
+echo $(cat Beau_P1_R2.fastq | wc -l) / 4 | bc &
+
+
+
+
+
+#using Mr. Demuxy
+pe_demuxer.py -r1 /demult/Beau_P1_R1.fastq -r2 /demult/Beau_P1_R2.fastq -r1_bc /demult/forward_bcs.txt -r2_bc /demult/reverse_bcs.txt -o /demult/demult_Beau_P1
+
+
+#in bash
+gzip *.fastq
+
+#naming files to change names well names to sample names 
+#1st column well_name; 2nd column: sample_name
+
+nano Beau_P1_R1_nf.txt
+nano Beau_P1_R2_nf.txt
+
+
+mkdir named
+xargs -n2 bash -c 'mv $1 named/$2' {} < Beau_P1_R1_nf.txt
+xargs -n2 bash -c 'mv $1 named/$2' {} < Beau_P1_R2_nf.txt
+
+
+ls named| wc -l
+#P1_R1: 85
+#P1_R2: 85
+
+
+#in demult_Beau_P1
+mkdir named_seqs
+mv R1/named/*.fastq.gz /demult/demult_Beau_P1/named_seqs/
+mv R2/named/*.fastq.gz /demult/demult_Beau_P1/named_seqs/
+
+ls named_seqs | wc -l
+#170
