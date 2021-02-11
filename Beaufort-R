@@ -1,0 +1,1822 @@
+require(ggplot2)
+require(reshape)
+require(ggExtra)
+require(ggpubr)
+require(Hmisc)
+require(vegan)
+require(indicspecies)
+require(pvclust)
+require(fpc)
+require(rgl)
+require(clustsig)
+require(ggridges)
+require(dplyr)
+require(plyr)
+require(extrafont)
+require(cluster)
+
+#Main dataset
+
+#OTUs clustered at 100% subsampled at 30k , tried at multiple levels and 30k was representative w.r.t. clustering
+#OTU table with tax
+
+BA_otutax<-read.delim("BA_100OTUs_relabund_OTUwtax.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+ncol(BA_otutax)
+#91 > 85 samples; 6 taxonomic levels
+nrow(BA_otutax)
+#295115 OTUs
+
+names(BA_otutax) <- gsub('_W', "", names(BA_otutax))
+
+#exploring sequenceing data
+BA_otutax$Total=rowSums(BA_otutax[,c(1:85)])
+
+#no singletons
+BA_otutax_ns=BA_otutax[!(BA_otutax$Total<="1"),]
+#78705 OTUs
+
+#no singletons or doubletons
+BA_otutax_nsd=BA_otutax[!(BA_otutax$Total<="2"),]
+
+nrow(BA_otutax_nsd)
+#41325 OTUs
+
+###How does singleton & doubleton removal affect analyses?
+
+##Most abundant taxa across all samples
+#Family level - all (none removed)
+Family_all=BA_otutax[,c(86:90,92)] #include total + all taxonomic levels upto family
+
+#create a column with all tax levels aggregated so you have all levels after summing total at family level
+Family_all$kpcof <- paste(Family_all$Kingdom,"_",Family_all$Phylum,"_",Family_all$Class,"_",Family_all$Order,"_",Family_all$Family)
+
+#aggregate families and sum totals
+Fam_all_agg = ddply(Family_all,"kpcof",numcolwise(sum))
+
+#display sorted from big to small
+Fam_all_agg=Fam_all_agg[with(Fam_all_agg, order(-Total)), ]
+write.table(Fam_all_agg,file="Fam_all_agg.txt",sep="\t")
+
+#no singletons (ns)
+Family_ns=BA_otutax_ns[,c(86:90,92)] #include total + all taxonomic levels upto family
+
+#create a column with all tax levels aggregdated so you have all levels after summin total at family level
+Family_ns$kpcof <- paste(Family_ns$Kingdom,"_",Family_ns$Phylum,"_",Family_ns$Class,"_",Family_ns$Order,"_",Family_ns$Family)
+
+#aggregate families and sum totals
+Fam_ns_agg = ddply(Family_ns,"kpcof",numcolwise(sum))
+
+#display sorted from big to small
+Fam_ns_agg=Fam_ns_agg[with(Fam_ns_agg, order(-Total)), ]
+write.table(Fam_ns_agg,file="Fam_ns_agg.txt",sep="\t")
+
+#no sings or doubs (nsd)
+Family_nsd=BA_otutax_nsd[,c(86:90,92)] #include total + all taxonomic levels upto family
+
+#create a column with all tax levels aggregdated so you have all levels after summin total at family level
+Family_nsd$kpcof <- paste(Family_nsd$Kingdom,"_",Family_nsd$Phylum,"_",Family_nsd$Class,"_",Family_nsd$Order,"_",Family_nsd$Family)
+
+#aggregate families and sum totals
+Fam_nsd_agg= ddply(Family_nsd,"kpcof",numcolwise(sum))
+
+#display sorted from big to small
+Fam_nsd_agg=Fam_nsd_agg[with(Fam_nsd_agg, order(-Total)), ]
+write.table(Fam_nsd_agg,file="Fam_nsd_agg.txt",sep="\t")
+
+#results:
+#removing sings no major differences
+#removing doubs, some major differences
+#issues with 100% clustering and losing OTUs that are adding to overall data set at genus or family level
+#investigate one tax group further
+
+#get only family Methyloligellaceae
+Methylolig<-subset(BA_otutax, grepl("Methyloligellaceae", BA_otutax$Family))
+nrow(Methylolig)
+#944
+
+#get genus level taxa and totals
+Methylolig_agg=ddply(Methylolig[,c(91:92)],"Genus",numcolwise(sum))
+
+#get genus level taxa and totals with no doubletons to compare
+Methylolig_nds=Methylolig[!(BA_otutax$Total<="2"),]
+Methylolig_nds_agg=ddply(Methylolig_nds[,c(91:92)],"Genus",numcolwise(sum))
+
+#removing doubletons here removed majority from genus level, the remainder from class and uncultured
+# Although removing singeltons did not seems to have major effects w.r.t. most abundant taxa
+# I will still use all OTUs in case there is something I am not seeing as I am not limited in comp power
+#Check all versions with hierarchichal clustering
+
+
+#####  Hierarchical Clustering ######################
+
+BA_otutax_t=as.data.frame(t(BA_otutax[,c(1:85)] )) #tranpose
+BA_otutax_ns_t=as.data.frame(t(BA_otutax_ns[,c(1:85)] ))
+BA_otutax_nds_t=as.data.frame(t(BA_otutax_nsd[,c(1:85)] ))
+
+#create distance matrix
+BA_otutax_dist <- vegdist(BA_otutax_t, method = "bray")
+
+#average doesn't seem like an applicable method, one cluster is one sample
+
+##looks like when working with ward.D you want to sqrt distances (Murtagh_Legendre_J_Class_2014)
+#This is done using ward.D2
+
+##Ward.D2
+BA_otutax.clust <- hclust(BA_otutax_dist, "ward.D2")
+plot(BA_otutax.clust)
+ward_cut_4<-cutree(BA_otutax.clust, k = 4)
+ward_cut_7<-cutree(BA_otutax.clust, k = 7)
+
+
+svg("Dendro7.svg")
+plot(BA_otutax.clust, cex = 0.6, hang = -1, xlim=c(1,100)) # plot wo boxes
+rect.hclust(BA_otutax.clust, k = 7) #plot w/ boxes
+dev.off()
+
+plot(BA_otutax.clust, cex = 0.6, hang = -1, xlim=c(1,100)) # plot wo boxes
+rect.hclust(BA_otutax.clust, k = 6)
+
+hcd <- as.dendrogram(BA_otutax.clust)
+nodePar <- list(lab.cex = 0.6, pch = c(NA, 19),
+                cex = 0.7, col = boxes[metadata$clusters])
+# Customized plot; remove labels
+
+svg("Dendro.svg")
+plot(hcd, ylab = "Height", nodePar = nodePar, leaflab = "none", col=boxes[metadata$clusters])
+rect.hclust(BA_otutax.clust, k = 4, border = boxes)
+dev.off()
+
+
+
+#silhouette plot
+plot(silhouette(cutree(BA_otutax.clust,4), BA_otutax_dist))
+summary(silhouette(cutree(BA_otutax.clust,4), BA_otutax_dist))
+plot(silhouette(cutree(BA_otutax.clust,5), BA_otutax_dist))
+summary(silhouette(cutree(BA_otutax.clust,5), BA_otutax_dist))
+
+#dispersion test
+clust4_bdisp=betadisper(BA_otutax_dist, ward_cut_4) #calculate homgeneity
+permutest(clust4_bdisp, pairwise = TRUE, permutations = 999)
+#not too heterogenous (not significant)
+
+clust7_bdisp=betadisper(BA_otutax_dist, ward_cut_7) #calculate homgeneity
+permutest(clust7_bdisp, pairwise = TRUE, permutations = 999)
+
+
+#make clusters abcd, instead of 1234
+ward_cut_4[ward_cut_4 == 2] <- "A"
+ward_cut_4[ward_cut_4 == 1] <- "B"
+ward_cut_4[ward_cut_4 == 3] <- "C"
+ward_cut_4[ward_cut_4 == 4] <- "D"
+
+#A tool for determining the number of significant clusters produced
+#using hclust() with the assumption of no a priori groups.
+
+simprof(BA_otutax_t, num.expected=1000, num.simulated=999,
+method.cluster="ward.D2", method.distance="actual-braycurtis", alpha=0.05,
+sample.orientation="row",warn.braycurtis=TRUE)
+
+#Cluster dendrogram
+
+#color for clusters
+boxes = c("A" = "#f49e6eff", "B"="#c1e3e1fe", "C"="#fedd82fc", "D"="#D05147")
+
+
+  plot(BA_otutax.clust, cex = 0.6, hang = -1, xlim=c(1,100)) # plot wo boxes
+  rect.hclust(BA_otutax.clust, k = 4, border = boxes) #plot w/ boxes
+legend("topright",legend = c("A", "B", "C", "D"), fill = boxes)
+
+svg("BA_otutax.clust.svg")
+plot(BA_otutax.clust, cex = 0.6, hang = -1, xlim=c(1,100))
+rect.hclust(BA_otutax.clust, k = 4, border = boxes)
+legend("topright",legend = c("A", "B", "C", "D"), fill = boxes)
+dev.off()
+
+### check heterogeneity within clusters
+BA_otutax_clust4_bdisp=betadisper(BA_otutax_dist, ward_cut_4) #calculate homgeneity
+permutest(BA_otutax_clust4_bdisp, pairwise = TRUE, permutations = 999)
+#Response: Distances
+#          Df  Sum Sq   Mean Sq     F N.Perm Pr(>F)
+#Groups     3 0.03319 0.0110617 2.034    999  0.129
+#Residuals 81 0.44051 0.0054384
+
+#Pairwise comparisons:
+#(Observed p-value below diagonal, permuted p-value above diagonal)
+#         A        B        C     D
+#A          0.018000 0.497000 0.251
+#B 0.015742          0.302000 0.390
+#C 0.480026 0.284142          0.772
+#D 0.235847 0.366511 0.783381
+
+
+
+adonis(formula = BA_otutax_t ~ ward_cut_4, method="bray")
+#Df SumsOfSqs MeanSqs F.Model      R2 Pr(>F)
+#ward_cut_4  3    6.2956 2.09852  12.627 0.31865  0.001 ***
+#Residuals  81   13.4616 0.16619         0.68135
+#Total      84   19.7571                 1.00000
+
+adonis(formula = BA_otutax_t ~ ward_cut_4, method="bray")
+
+#Figure 1
+##Add dendro script
+#make dendro with better pixels for paper
+##Cluster analyses
+##Cluster dendrogram
+div_dens<-ggplot(data=envdata_clust,aes(x=invsimp, group=clust_4, fill=clust_4)) +
+geom_density(adjust=1.5 , alpha=0.9)+
+scale_fill_manual( values = boxes)+
+  theme(
+    panel.background = element_rect(fill = "transparent") # bg of the panel
+    , plot.background = element_rect(fill = "transparent", color = NA) # bg of the plot
+    , panel.grid.major = element_blank() # get rid of major grid
+    , panel.grid.minor = element_blank() # get rid of minor grid
+    , legend.background = element_rect(fill = "transparent") # get rid of legend bg
+    , legend.box.background = element_rect(fill = "transparent") # get rid of legend panel bg
+  )
+
+ggsave(filename = "div_dens.png",div_dens, bg="transparent", dpi = 700, device='png')
+
+####Assemblage composition
+
+
+#look at proportion of family level across all samples
+sum(Fam_all_agg$Total)
+#2550000
+
+#top 25 families
+sum(Fam_all_agg[c(1:25),]$Total)
+#1484335
+1484335/2550000 #58%
+
+sum(Fam_all_agg[c(1:50),]$Total)
+#1848352
+1848352/2550000 #73%
+
+sum(Fam_all_agg[c(1:75),]$Total)
+#2072955
+2072955/2550000
+
+sum(Fam_all_agg[c(1:400),]$Total)
+#2218361
+2455903/2550000
+
+##25 most Abundant taxa
+#combine family and order level names in one column
+BA_otutax$OF=paste(BA_otutax$Order,"_",BA_otutax$Family)
+
+#get otu table with OF
+Family_top=BA_otutax[c(1:85,93)]
+#fix naming convention
+Family_top$OF <- gsub('(100)', ".", Family_top$OF)
+Family_top$OF<-gsub("(.)", "", Family_top$OF, fixed=TRUE)
+Fam_ord_agg=as.data.frame.list(by(Family_top[,c(1:85)], Family_top$OF, FUN=colSums))
+Fam_ord_aggt=as.data.frame(t(Fam_ord_agg))
+Fam_ord_aggt$Total <- rowSums(Fam_ord_aggt)
+Fam_ord_aggt <- Fam_ord_aggt[with(Fam_ord_aggt, order(-Total)), ]
+Fam_ord_aggt[c(1:25),59]
+Top_29=Fam_ord_aggt[c(1:29),c(1:85)]
+Top_25<-Top_29[-c(7,10,13,21),]#remove uncultured / Unidentified
+#change naming convention
+name_fam<-read.delim("Name_fam.txt", header=TRUE, sep="\t")
+Top_25$names=name_fam$Family
+rownames(Top_25)=Top_25$names
+
+# get clusters as columns on dataframe
+Top_25t<-as.data.frame(t(Top_25[,c(1:85)]))
+Top_25t$clusters<-ward_cut_4
+#get mean for clusters
+Top_25t_mean<- aggregate(.~clusters, data=Top_25t, mean)
+rownames(Top_25t_mean)<-Top_25t_mean$clusters
+Top_25t_mean<-as.data.frame(t(Top_25t_mean[,-1]))
+
+#get proportions for weildiness
+Top_25_prop<-round(prop.table(as.matrix(Top_25t_mean),1),3)
+Top_25t_mean_melt<-melt(Top_25_prop,id.vars = colnames(Top_25_prop))
+names(Top_25t_mean_melt)[1]<-"Family"
+names(Top_25t_mean_melt)[2]<-"Clust"
+
+
+require(extrafont)
+font_import()
+# Vector of font family names
+fonts()
+
+# Show entire table
+fonttable()
+
+
+ reorder(the_factor, desc(the_factor))
+    stacked<-ggplot(Top_25t_mean_melt, aes(fill=Clust, y=value, x=reorder(Family, desc(Family)))) +
+        geom_bar(position="fill", stat="identity")+
+        scale_fill_manual(values=boxes)+
+        coord_flip() +
+        theme_classic(base_size = 18, base_family="Times New Roman")
+
+    ggsave(filename = "stacked.png",stacked, bg="transparent", device='png')
+    ggsave(filename = "stacked.svg",stacked, bg="transparent", device='svg')
+
+
+#look at top 25 for genera
+
+Gen_top=BA_otutax[c(1:85,91)]
+Gen_top_agg=as.data.frame.list(by(Gen_top[,c(1:85)],Gen_top$Genus, FUN=colSums))
+Gen_top_aggt=as.data.frame(t(Gen_top_agg))
+Gen_top_aggt$Total <- rowSums(Gen_top_aggt)
+Gen_top_aggt <- Gen_top_aggt[with(Gen_top_aggt, order(-Total)), ]
+Top_30_gen=Gen_top_aggt[c(1:30),c(1:85)]
+Top_30_gen_tot=Gen_top_aggt[c(1:30),c(1:85)]
+Top_25<-Top_29[-c(7,10,13,21),]#remove uncultured / Unidentified
+#change naming convention
+name_fam<-read.delim("Name_fam.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+Top_25$names=name_fam$Family
+rownames(Top_25)=Top_25$names
+
+
+###Indicator Taxa analysis
+indic_all = multipatt(BA_otutax_t, ward_cut_4, duleg=FALSE,control=how(nperm=999))
+
+sink("BA_multipatt_10.30.txt")
+print(summary(indic_all, alpha=0.001,  At=0.9, Bt=0.9, indvalcomp=TRUE))
+sink()
+
+
+###Indicator taxa figure
+
+#subset data based on genus level
+#combine polaribacters
+BA_otutax_pbact=BA_otutax
+
+BA_otutax_pbact$Genus <- gsub('Polaribacter_1', "Polaribacter", BA_otutax_pbact$Genus)
+BA_otutax_pbact$Genus <- gsub('Polaribacter_4', "Polaribacter", BA_otutax_pbact$Genus)
+
+#checking
+polar<-subset(BA_otutax_pbact, grepl("Polaribacter", BA_otutax_pbact$Genus))
+head(polar[,c(87:92)])
+polar_agg=ddply(polar[,c(89:92)],"Genus",numcolwise(sum))
+
+
+
+genus=c("Desulfococcus(100)",	"SEEP-SRB1(100)",	"Desulfobulbus(100)",	"Desulfocapsa(100)",	"Desulforhopalus(100)",	"SEEP-SRB4(100)", "Polaribacter_1(100)", "Polaribacter_4(100)", "Polaribacter(100)", "Ulvibacter(100)", "Candidatus_Nitrosopumilus(100)", "Nitrospira(100)", "Loktanella(100)", "Octadecabacter(100)", "Candidatus_Scalindua(100)", "Subgroup_10(100)", "Cocleimonas(100)", "Sulfurimonas(100)")
+ind_gen=BA_otutax_pbact[BA_otutax_pbact$Genus %in% genus,]
+ind_gen_agg=ddply(ind_gen,"Genus",numcolwise(sum))
+rownames(ind_gen_agg)=ind_gen_agg[,1]
+ind_gen_agg=ind_gen_agg[,-c(1,87)]
+
+#subgroup 7 is in class holophagae
+ord=c("SAR202_clade(100)","SAR324_clade(Marine_group_B)(100)", "SBR1031(100)")
+ind_ord=BA_otutax[BA_otutax$Order %in% ord,]
+ind_ord_agg=ddply(ind_ord,"Order",numcolwise(sum))
+rownames(ind_ord_agg)=ind_ord_agg[,1]
+ind_ord_agg=ind_ord_agg[,-c(1,87)]
+
+fam=c("Anaerolineaceae(100)", "PHOS-HE36(100)", "Magnetospiraceae(100)")
+ind_fam=BA_otutax[BA_otutax$Family %in% fam,]
+ind_fam_agg=ddply(ind_fam,"Family",numcolwise(sum))
+rownames(ind_fam_agg)=ind_fam_agg[,1]
+ind_fam_agg=ind_fam_agg[,-c(1,87)]
+
+class=c("Subgroup_6(100)", "Subgroup_9(100)", "Subgroup_21(100)","Subgroup_22(100)", "Subgroup_26(100)", "Bathyarchaeia(100)")
+ind_class=BA_otutax[BA_otutax$Class %in% class,]
+ind_class_agg=ddply(ind_class,"Class",numcolwise(sum))
+rownames(ind_class_agg)=ind_class_agg[,1]
+ind_class_agg=ind_class_agg[,-c(1,87)]
+
+phy="Schekmanbacteria(100)"
+ind_phy=BA_otutax[BA_otutax$Phylum %in% phy,]
+ind_phy_agg=ddply(ind_phy,"Phylum",numcolwise(sum))
+rownames(ind_phy_agg)=ind_phy_agg[,1]
+ind_phy_agg=ind_phy_agg[,-c(1,87)]
+
+ind_gen_aggt=as.data.frame(t(ind_gen_agg))
+ind_ord_aggt=as.data.frame(t(ind_ord_agg))
+ind_fam_aggt=as.data.frame(t(ind_fam_agg))
+ind_class_aggt=as.data.frame(t(ind_class_agg))
+ind_phy_aggt=as.data.frame(t(ind_phy_agg))
+
+ind_gen_aggt$clust_4=ward_cut_4
+ind_ord_aggt$clust_4=ward_cut_4
+ind_fam_aggt$clust_4=ward_cut_4
+ind_class_aggt$clust_4=ward_cut_4
+ind_phy_aggt$clust_4=ward_cut_4
+
+ind_gen_mean<- aggregate(.~clust_4, data=ind_gen_aggt, mean)
+ind_ord_mean<- aggregate(.~clust_4, data=ind_ord_aggt, mean)
+ind_fam_mean<- aggregate(.~clust_4, data=ind_fam_aggt, mean)
+ind_class_mean<- aggregate(.~clust_4, data=ind_class_aggt, mean)
+ind_phy_mean<- aggregate(.~clust_4, data=ind_phy_aggt, mean)
+
+ind_tax_comb=Reduce(merge, list(ind_gen_mean,ind_ord_mean,ind_fam_mean,ind_class_mean,ind_phy_mean))
+rownames(ind_tax_comb)=ind_tax_comb[,1]
+ind_tax_comb=ind_tax_comb[,-1]
+ind_tax_combt=as.data.frame(t(ind_tax_comb))
+ind_tax_combt <- ind_tax_combt[order(rownames(ind_tax_combt)),]
+#change naming convention
+ind_name<-read.delim("Ind_tax_naming.txt", header=TRUE, sep="\t")
+rownames(ind_name)=ind_name$Convention
+ind_name <- ind_name[order(rownames(ind_name)),]
+
+ind_tax_combt_name <- merge(ind_tax_combt,ind_name,by="row.names",all.x=TRUE)
+rownames(ind_tax_combt_name)=ind_tax_combt_name$Names
+ind_tax_combt_name=ind_tax_combt_name[,-c(1,6:7)]
+
+#get proportions and melt
+ind_tax_combt_name<-round(prop.table(as.matrix(ind_tax_combt_name),1),3)
+ind_tax_combt_name<-as.matrix(ind_tax_combt_name)
+ind_tax_combt_name_melt<-melt(ind_tax_combt_name,id.vars = colnames(ind_tax_combt_name))
+
+#wo naming convention:
+ind_tax_combt<-round(prop.table(as.matrix(ind_tax_combt),1),3)
+ind_tax_combt<-as.matrix(ind_tax_combt)
+ind_tax_combt_melt<-melt(ind_tax_combt,id.vars = colnames(ind_tax_combt))
+
+
+level=c("Bathyarchaeia(100)","Schekmanbacteria(100)","Subgroup_6(100)", "Subgroup_9(100)", "Subgroup_21(100)", "Subgroup_22(100)","Subgroup_26(100)", "SAR202_clade(100)","SAR324_clade(Marine_group_B)(100)", 'SBR1031', "Magnetospiraceae(100)", 'PHOS-HE36', "Desulfococcus(100)",	"SEEP-SRB1(100)",	"Desulfobulbus(100)",	"Desulfocapsa(100)",	"Desulforhopalus(100)",	"SEEP-SRB4(100)", "Polaribacter(100)", "Ulvibacter(100)", "AqS1(100)", "Candidatus_Nitrosopumilus(100)", "Nitrospira(100)", "Loktanella(100)", "Octadecabacter(100)", "Candidatus_Scalindua(100)", "Subgroup_10(100)", "Cocleimonas(100)", "Sulfurimonas(100)")
+
+# \'@\',
+level_name=c('Subgroup 6', 'Subgroup 7', 'Subgroup 9',	'Subgroup 21',	'Subgroup 22',	'Subgroup 26', 'Subgroup 10', 'SAR202 Clade',	'SAR324 Clade', 'Magnetospira','Candidatus Nitrosopumilus',	'Nitrospira',	'Candidatus Scalindua','Bathyarchaeota', 'Schekmanbacteria', 'Anaerolineaceae', 'PHOS-HE36', 'SBR1031', 'SEEP-SRB1*',	'SEEP-SRB4*', 'Desulfobulbus', 'Desulfocapsa*', 'Desulfococcus', 'Desulforhopalus*', 'Cocleimonas',	'Sulfurimonas', 'Ulvibacter', 'Polaribacter',	'Loktanella',	'Octadecabacter')
+
+level_name3=c('Subgroup 6',	'Subgroup 9',	'Subgroup 21',	'Subgroup 22',	'Subgroup 26',	'Subgroup 10',	'SAR202  Clade',	'SAR324  Clade',	'Magnetospiraceae', 'Candidatus Nitrosopumilus',	'Nitrospira',	'Candidatus Scalindua',	'Bathyarchaeota',	'Schekmanbacteria',	'Anaerolineaceae',	'PHOS-HE36',	'SBR1031',	'SEEP-SRB1*',	'SEEP-SRB4*',	'Desulfobulbus',	'Desulfocapsa*',	'Desulfococcus',	'Desulforhopalus*',	'Cocleimonas',	'Sulfurimonas',	'Ulvibacter',	'Polaribacter',	'Loktanella',	'Octadecabacter')
+
+label_font3=c('Subgroup 6',	'Subgroup 9',	'Subgroup 21',	'Subgroup 22',	'Subgroup 26',	'Subgroup 10',	'SAR202  Clade',	'SAR324  Clade',	'Magnetospiraceae',	expression(paste(italic('Candidatus Nitrosopumilus'))),	expression(paste(italic('Nitrospira'))),	expression(paste(italic('Candidatus Scalindua'))),	'Bathyarchaeota',	'Schekmanbacteria',	'Anaerolineaceae',	'PHOS-HE36',	'SBR1031',	'SEEP-SRB1*',	'SEEP-SRB4*',	expression(paste(italic('Desulfobulbus'))),	expression(paste(italic('Desulfocapsa*'))),	expression(paste(italic('Desulfococcus'))),	expression(paste(italic('Desulforhopalus*'))),	expression(paste(italic('Cocleimonas'))),	expression(paste(italic('Sulfurimonas'))),	expression(paste(italic('Ulvibacter'))),	expression(paste(italic('Polaribacter'))),	expression(paste(italic('Loktanella'))),	expression(paste(italic('Octadecabacter'))))
+
+#used custom formatting in excel for below "expression""(""paste""(""italic""("\'@\'"))),"
+label_font=c('Subgroup 6', 'Subgroup 7',	'Subgroup 9',	'Subgroup 21',	'Subgroup 22',	'Subgroup 26','Subgroup 10', 'SAR202 Clade',	'SAR324 Clade', 'Magnetospiraceae', expression(paste(italic('Candidatus Nitrosopumilus'))), expression(paste(italic('Nitrospira'))), expression(paste(italic('Candidatus Scalindua'))), 'Bathyarchaeota', 'Schekmanbacteria', 'Anaerolineaceae', 'PHOS-HE36', 'SBR1031', 'SEEP-SRB1*',	'SEEP-SRB4*', expression(paste(italic('Desulfobulbus'))),	expression(paste(italic('Desulfocapsa*'))),	expression(paste(italic('Desulfococcus'))),	expression(paste(italic('Desulforhopalus*'))), expression(paste(italic('Cocleimonas'))),	expression(paste(italic('Sulfurimonas'))), expression(paste(italic('Ulvibacter'))), expression(paste(italic('Polaribacter'))), expression(paste(italic('Loktanella'))), expression(paste(italic('Octadecabacter'))))
+
+
+  'Bathyarchaeota','Schekmanbacteria', 'Subgroup 6',	'Subgroup 9',	'Subgroup 21',	'Subgroup 22',	'Subgroup 26',	'SAR202 Clade',	'SAR324 Clade', 'SBR1031',	'Magnetospiraceae', 'PHOS-HE36',	'Subgroup 10',	expression(paste(italic('Candidatus Nitrosopumilus'))),	expression(paste(italic('Nitrospira'))),	expression(paste(italic('Candidatus Scalindua'))),	expression(paste(italic('Polaribacter'))),	expression(paste(italic('Ulvibacter'))),	expression(paste(italic('Loktanella'))), 	expression(paste(italic('Octadecabacter'))),	expression(paste(italic('Cocleimonas'))),	expression(paste(italic('Sulfurimonas'))),	expression(paste(italic('Desulfococcus'))),	expression(paste(italic('Desulfobulbus'))),	expression(paste(italic('Desulfocapsa*'))),	expression(paste(italic('Desulforhopalus*'))),	'SEEP-SRB1*',	'SEEP-SRB4*')
+
+cols=c("#bdbdbd", "#c1e3e1fe", "#fedd82fc", "#f49e6eff", "#D05147")
+#vertical
+ind_tax_vert=ggplot(ind_tax_combt_name_melt, aes(x=Var2, y=ordered(Var1,level=rev(label_font)), colour = value, size = value)) +
+  geom_point() +
+  scale_colour_gradient(colours = cols) +
+  scale_size(range = c(1,10)) +
+  guides(color= guide_legend(), size=guide_legend())+ theme_bw(base_size = 18, base_family="Times New Roman")
+
+
+  ggsave(filename = "ind_tax_vert.svg",ind_tax_vert, bg="transparent", device='svg')
+
+#horizontal
+#need level name for aes and label font for scale x
+ind_tax_horiz_4=ggplot(ind_tax_combt_name_melt, aes(x=ordered(X1,level=(level_name3)), y=reorder(X2, desc(X2)), colour = value, size = value)) +
+  geom_point() +
+  scale_colour_gradientn(colours = cols) +
+  scale_size(range = c(1,10)) +
+  scale_x_discrete(labels = label_font3) +
+  guides(color= guide_legend(), size=guide_legend())+ theme_bw(base_size = 18, base_family="Times New Roman")+
+  theme(axis.text.x = element_text(angle=70, hjust=1))
+
+  ggsave(filename = "ind_tax_horiz_2.png",ind_tax_horiz_2, bg="transparent", device='png')
+  ggsave(filename = "ind_tax_horiz_4.svg",ind_tax_horiz_4, bg="white", device='svg')
+
+
+
+
+  ggplot(ind_tax_melt, aes(x=ordered(Var1,level=rev(level)), y=Var2, colour = value, size = value)) +
+    geom_point() +
+    scale_colour_gradientn(colours = cols) +
+    theme(legend.position="bottom") +
+    scale_size(range = c(1,10)) +
+    guides(color= guide_legend(), size=guide_legend())+ theme_bw()+
+    scale_color_manual(name = "Assemblage",values = cols)
+
+
+#Phylum level
+
+Phylum_tree=BA_otutax[,c(1:85,87)]
+Phylum_tree$Total <- rowSums(Phylum_tree[,c(1:85)])
+Phylum_tree=Phylum_tree[,c(86:87)]
+Phylum_tree_agg=ddply(Phylum_tree,"Phylum",numcolwise(sum))
+Phylum_tree_sort <- Phylum_tree_agg[with(Phylum_tree_agg, order(-Total)), ]
+
+
+#class level treemap
+###Class level treemap overall
+class_tree=BA_otutax[,c(1:85,88)]
+class_tree$Total <- rowSums(class_tree[,c(1:85)])
+class_tree=class_tree[,c(86:87)]
+class_tree_agg=ddply(class_tree,"Class",numcolwise(sum))
+class_tree_sort <- class_tree_agg[with(class_tree_agg, order(-Total)), ]
+
+
+class_tree_sort$Prop = class_tree_sort$Total / sum(class_tree_sort$Total)
+class_tree_sort$Perc=class_tree_sort$Prop *100
+
+class_tree_sort10=class_tree_sort[c(1:10),]
+class_tree_sort15=class_tree_sort[c(1:15),]
+
+pie(class_tree_sort15[c(1:5),4])
+treemap(class_tree_sort10,
+            index="Class",
+            vSize="Prop",
+            type="index"
+            )
+
+class_10_prop=class_tree_sort10[,c(1,3)]
+class_packing <- circleProgressiveLayout(class_10_prop$Prop, sizetype='area')
+class_10_prop <- cbind(class_10_prop, class_packing)
+
+class_10.gg <- circleLayoutVertices(class_packing, npoints=50)
+
+# Make the plot
+svg("circ_plot_class.svg")
+ggplot() +
+
+  # Make the bubbles
+  geom_polygon(data = class_10.gg, aes(x, y, group = id, fill=as.factor(id)), colour = "black", alpha = 0.6) +
+
+  # Add text in the center of each bubble + control its size
+  geom_text(data = class_10_prop, aes(x, y, size=Prop, label = Class)) +
+  scale_size_continuous(range = c(1,4)) +
+
+  # General theme:
+  theme_void() +
+  theme(legend.position="none") +
+  coord_equal()
+  dev.off()
+
+###########exploring environmental data
+
+metadata=read.delim("Metadata_10.19.txt", header=TRUE, sep="\t")
+#make sampleIDs rownames
+rownames(metadata)=metadata[,1]
+metadata=metadata[,-1]
+
+#add chlA+phaeo and clusters to dataframe
+metadata$chlphsum=metadata$ChlA + metadata$Phaeo
+metadata$clusters=ward_cut_4
+names(metadata)
+write.table(metadata,file="Metadata_wclusters.txt",sep="\t")
+
+
+#correlations between numeric environmental variables (non-normal distributions)
+corr_df<-metadata[,c(1,3:17,20)]
+corr_all<-rcorr(as.matrix(corr_df), type = "spearman") #with p-values
+
+#save as txt to setup format better (text to columns in excel)
+sink("corr_env_p.txt")
+print(corr_all$P)
+sink()
+
+sink("corr_env_rho.txt")
+print(corr_all$r)
+sink()
+
+corr_env_p=read.delim("corr_env_p.txt", header=TRUE, sep="\t")
+rownames(corr_env_p)=corr_env_p$X
+corr_env_p=corr_env_p[,-1]
+
+corr_env_rho=read.delim("corr_env_rho.txt", header=TRUE, sep="\t")
+rownames(corr_env_rho)=corr_env_rho$X
+corr_env_rho=corr_env_rho[,-1]
+
+#replace all rho values with NA if not significant using p and rho dataframe
+corr_env_rho[corr_env_p > 0.05] <- NA
+
+write.table(corr_env_rho,"corr_rho_sig.txt",sep="\t",row.names=TRUE, col.names=TRUE)
+
+##PCA https://www.datacamp.com/community/tutorials/pca-analysis-r
+env_PCA<-metadata[,c(1,4:14,18)]
+
+
+beauenv.pca <- prcomp(na.omit(env_PCA), center = TRUE, scale = TRUE)
+
+ggbiplot(beauenv.pca)
+
+#to plot with rownames you need to get rid of those rows with NAs
+env_PCA[complete.cases(env_PCA), ]
+metadata_PCA=metadata[complete.cases(metadata), ]
+
+#plot
+ggbiplot(beauenv.pca, labels=rownames(env_PCA[complete.cases(env_PCA), ]))
+ggbiplot(beauenv.pca, labels=metadata_PCA$clusters)
+ggbiplot(beauenv.pca, labels=metadata_PCA$GenArea)
+
+#PC1 and 2
+ggbiplot(beauenv.pca,ellipse=TRUE,  labels=rownames(env_PCA[complete.cases(env_PCA), ]), groups=metadata_PCA$clusters)
+#can see a clear separation between environment in asssemblage A along
+#along PC2 that is closely + correlated to d15N, Sal, Depth, Longitude and
+#- correlated with chlA, Phaeo, and ChlA+Phaeo.
+
+#PC 3 & 4
+ggbiplot(beauenv.pca,ellipse=TRUE,choices=c(3,4),labels=rownames(env_PCA[complete.cases(env_PCA), ]), groups=metadata_PCA$clusters)
+
+#further customization
+ggbiplot(beauenv.pca,ellipse=TRUE,obs.scale = 1, var.scale = 1,  labels=rownames(env_PCA[complete.cases(env_PCA), ]), groups=metadata_PCA$clusters) +
+  scale_colour_manual(name="Cluster", values= boxes)+
+  ggtitle("PCA of Environment w/ Clusters")+
+  theme_minimal()+
+  theme(legend.position = "bottom")
+
+GenArea_col=c('#d7191c','#fdae61','#abdda4','#2b83ba')
+  ggbiplot(beauenv.pca,ellipse=TRUE,obs.scale = 1, var.scale = 1,  labels=rownames(env_PCA[complete.cases(env_PCA), ]), groups=metadata_PCA$GenArea) +
+    scale_colour_manual(name="GenArea", values= GenArea_col)+
+    ggtitle("PCA of Environment General Area")+
+    theme_minimal()+
+    theme(legend.position = "bottom")
+
+
+#comm with environmental
+
+#choosing best model for dbrda or C.Nle
+#need to remove all rows with NAs first
+OTU_env=merge(BA_otutax_t, metadata, by="row.names", all=TRUE)
+rownames(OTU_env)=OTU_env[,1]
+OTU_env=OTU_env[,-1]
+nrow(OTU_env)
+#85
+ncol(BA_otutax_t)
+#295115
+
+OTU_env_noNAs=OTU_env[complete.cases(OTU_env), ]
+nrow(OTU_env_noNAs)
+#70
+
+OTU_noNAS=OTU_env_noNAs[,c(1:295115)]
+Env_noNAs=OTU_env_noNAs[,c(295116:295136)]
+ncol(OTU_env_noNAs)
+#295136
+
+#ordistep
+#Automatic stepwise model building for constrained ordination
+#methods (‘cca’, ‘rda’, ‘capscale’):
+cap_mod0 <- capscale(OTU_noNAS ~ 1, Env_noNAs[,c(1,4:17,20)], distance="bray")  # Model with intercept only
+
+#remove redundant metrics like pct. oc, ON, and Porosity
+Env_noNAs_nonred=Env_noNAs[,c(1,4:6,8:10,12:13,15:17,20)]
+cap_mod_all <- capscale(OTU_noNAS ~ ., Env_noNAs_nonred, distance="bray")  # Model with all explanatory variables
+
+#find redundant (collinear) variables to remove
+vif.cca(cap_mod_all)
+#try without TOC, TON, and C.N
+Env_noNAs_nonred_1=Env_noNAs_nonred[,-c(7:9)]
+cap_mod_1 <- capscale(OTU_noNAS ~ ., Env_noNAs_nonred_1, distance="bray")  # Model with all explanatory variables
+vif.cca(cap_mod_1)
+
+
+## With scope present, the default direction is "both"
+#trace = false will suppress voluminous output during model building
+cap_mod1_ordi=ordistep(cap_mod0, scope = formula(cap_mod_1, trace = FALSE))
+
+cap_mod1_ordi
+## summary table of steps
+cap_mod1_ordi$anova
+#Df    AIC       F Pr(>F)
+#+ Depth        1 194.12 10.7239  0.005 **
+#+ Temp         1 191.94  4.1216  0.005 **
+#+ d15N         1 190.19  3.6401  0.005 **
+#+ Phaeo        1 189.98  2.0827  0.005 **
+#+ SC_Porosity  1 189.31  2.4844  0.005 **
+#+ chlphsum     1 189.06  2.0606  0.005 **
+#+ d13C         1 189.19  1.6768  0.010 **
+
+
+#Capscale with cap_mod1
+
+#doesn't like 0 values?
+OTU_nonzero=(OTU_noNAS + 0.001)
+
+idealmod1_cap=capscale(OTU_noNAS ~ Depth + Temp + d15N + Phaeo + SC_Porosity + Chl.Phaeo + d13C, Env_noNAs_nonred, distance="bray", na.action=na.exclude)
+
+#test if non zero OTUs or add= TRUE changes plot  or sig
+idealmod1_cap_add=capscale(OTU_noNAS ~ Depth + Temp + d15N + Phaeo + SC_Porosity + Chl.Phaeo + d13C, Env_noNAs_nonred, distance="bray", na.action=na.exclude, add=TRUE)
+idealmod1_cap_nonzero=capscale(OTU_nonzero ~ Depth + Temp + d15N + Phaeo + SC_Porosity + Chl.Phaeo + d13C, Env_noNAs_nonred, distance="bray", na.action=na.exclude)
+#doesn't change plot, some sig is change chl.phaeo not sig in add or nonzero
+
+#The test is sequential, and the order of terms will influence the results,
+#unless the terms are uncorrelated. In this case the same number of permutations will be used for all terms.
+#command analyses all terms separately in a sequential (“Type I”) test:
+anova(idealmod1_cap, by="term", permu=999)
+#All sig
+
+#“Type III” tests analyse the marginal effects when each term is eliminated from the model containing all other terms
+#The marginal e↵ects are independent of the order of the terms, but cor- related terms will get higher (“worse”)
+#P -values. Now the the sum of test statistics is not equal to the Model test statistic in the overall test,
+#unless the terms are uncorrelated.
+anova(idealmod1_cap, by="margin", permu=999)
+#not sig : chl.phaeo
+
+#We can also ask for a test of individual axes:
+anova(idealmod1_cap, by="axis", permu=999)
+#CAP1=4 is significant
+
+scores(idealmod1_cap) # getting the scores
+scores_idealmod1_cap=scores(idealmod1_cap) #getting the scores from the analysis; notice species and sites are together
+site_scores=scores_idealmod1_cap$sites #separating out the site scores; get CAP1 and CAP2 scores fix(site_scores)
+species_scores=scores_idealmod1_cap$species #separating out the species scores
+fix(species_scores)
+site_scores_environment=cbind(site_scores,Env_noNAs_nonred) #calculating loadings/environmental correlations with the axes
+correlations=cor(site_scores_environment, use="na.or.complete") #merge
+fix(correlations) #calculate correlations
+write.table(correlations,file="Correlations_mod1.txt",sep="\t")
+
+plot(idealmod1_cap, type="n")
+points(idealmod1_cap, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(idealmod1_cap, dis="cn")
+
+vif.cca(idealmod1_cap) #looks good no collinearity
+
+#based on this I would remove chl.phaeo and temp and add chl.A back in
+
+idealmod2_cap=capscale(OTU_noNAS ~ Depth + ChlA + d15N + Phaeo + SC_Porosity + d13C, Env_noNAs_nonred, distance="bray", na.action=na.exclude)
+
+anova(idealmod2_cap, by="term", permu=999)
+#all sig
+
+anova(idealmod2_cap, by="margin", permu=999)
+#all sig
+
+anova(idealmod2_cap, by="axis", permu=999)
+#1-4 sig
+
+vif.cca(idealmod2_cap) #looks good no collinearity
+
+
+plot(idealmod2_cap, type="n")
+points(idealmod2_cap, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(idealmod2_cap, dis="cn")
+
+cap_mod2_ordi=ordistep(cap_mod0, scope = formula(idealmod2_cap, trace = FALSE))
+cap_mod2_ordi$anova
+
+# new model with different order based on above
+idealmod3_cap=capscale(OTU_noNAS ~ Depth + d15N + Phaeo + SC_Porosity + ChlA + d13C, Env_noNAs_nonred, distance="bray", na.action=na.exclude)
+anova(idealmod3_cap, by="term", permu=999)
+#all sig
+
+anova(idealmod3_cap, by="margin", permu=999)
+#all sig
+
+anova(idealmod3_cap, by="axis", permu=999)
+#1-4 sig
+
+vif.cca(idealmod3_cap) #looks good no collinearity
+
+#axes 1 & 2
+plot(idealmod3_cap, type="n")
+points(idealmod3_cap, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(idealmod3_cap, dis="cn")
+
+
+
+#try with ordi2step
+idealmod3_ordi2=ordiR2step(mod0, idealmod3_cap)
+idealmod3_ordi2$anova
+
+##try cap and ordi without depth
+cap_mod_wodepth <- capscale(OTU_noNAS ~ ., Env_noNAs_nonred[,-1], distance="bray")  # Model with all explanatory variables except depth
+cap_modwodepth_ordi=ordistep(cap_mod0, scope = formula(cap_mod_wodepth, trace = FALSE))
+cap_modwodepth_ordi$anova
+
+idealmod1_wodepth=capscale(OTU_noNAS ~ Sal + d15N + Temp + TOC + Phaeo + ChlA +C.N, Env_noNAs_nonred, distance="bray", na.action=na.exclude)
+vif.cca(idealmod1_wodepth) #looks good
+anova(idealmod1_wodepth, by="term", permu=999)
+#all sig
+
+anova(idealmod1_wodepth, by="margin", permu=999)
+#all sig
+
+anova(idealmod1_wodepth, by="axis", permu=999)
+#1-4 sig
+
+plot(idealmod1_wodepth, type="n")
+points(idealmod1_wodepth, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(idealmod1_wodepth, dis="cn")
+
+mod1_wodepth_ordi2=ordiR2step(mod0, idealmod1_wodepth)
+mod1_wodepth_ordi2$anova
+
+#with depth, wo sal and temperatures
+idealmod_combo=capscale(OTU_noNAS ~ Depth + d15N + TOC + Phaeo + SC_Porosity + ChlA +C.N + d13C, Env_noNAs_nonred, distance="bray", na.action=na.exclude)
+vif.cca(idealmod_combo) #all under 10 but d13C and C.N are high
+anova(idealmod_combo, by="term", permu=999)
+#porosity and d13C not sig
+
+anova(idealmod_combo, by="margin", permu=999)
+#d13c, CN, porosity, TOC not significant
+
+anova(idealmod_combo, by="axis", permu=999)
+#1-4 sig
+
+plot(idealmod_combo, type="n")
+points(idealmod_combo, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(idealmod_combo, dis="cn")
+
+idealmod_combo2=capscale(OTU_noNAS ~ Depth + d15N + TOC + Phaeo + SC_Porosity + ChlA + d13C, Env_noNAs_nonred, distance="bray", na.action=na.exclude)
+vif.cca(idealmod_combo2) #much better
+anova(idealmod_combo2, by="term", permu=999)
+#porosity not sig
+
+anova(idealmod_combo2, by="margin", permu=999)
+#porosity & TOC not significant
+
+anova(idealmod_combo2, by="axis", permu=999)
+#1-4 sig
+
+plot(idealmod_combo2, type="n")
+points(idealmod_combo2, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(idealmod_combo2, dis="cn")
+idealmod_combo2_ordi=ordistep(cap_mod0, scope = formula(idealmod_combo2, trace = FALSE))
+#step: OTU_noNAS ~ Depth + d15N + TOC + Phaeo + ChlA + d13C
+idealmod_combo2_ordi$anova
+
+idealmod_combo3=capscale(OTU_noNAS ~ Depth + d15N + TOC + Phaeo + ChlA + d13C, Env_noNAs_nonred, distance="bray", na.action=na.exclude)
+
+vif.cca(idealmod_combo3) #good
+anova(idealmod_combo3, by="term", permu=999)
+#all sig
+
+anova(idealmod_combo3, by="margin", permu=999)
+#all sig
+
+anova(idealmod_combo3, by="axis", permu=999)
+#1-4 sig
+
+plot(idealmod_combo3, type="n")
+points(idealmod_combo3, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(idealmod_combo3, dis="sites")
+
+plot(idealmod_combo3, type="n")
+points(idealmod_combo3, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(idealmod_combo3, dis="cn")
+
+adonis2(OTU_noNAS ~ Depth + d15N + TOC + Phaeo + ChlA + d13C, data = Env_noNAs_nonred, by = NULL, method="bray")
+
+adonis(OTU_noNAS ~ Depth + d15N + TOC + Phaeo + ChlA + d13C, data = Env_noNAs_nonred, by = NULL, method="bray")
+
+coef(idealmod_combo3)
+RsquareAdj(idealmod_combo3)
+
+#look at CCA and CA data
+names(idealmod_combo3$CCA)
+names(idealmod_combo3$CA)
+#to look at env variable by axis
+idealmod_combo3$CCA$biplot
+
+require(vegan3d)
+
+ordiplot3d(idealmod_combo3, type = "h")
+
+
+
+names(scores(idealmod_combo3)) # getting the scores
+scores_idealmod_combo3=scores(idealmod_combo3) #getting the scores from the analysis; notice species and sites are together
+site_scores=scores_idealmod_combo3$sites #separating out the site scores; get CAP1 and CAP2 scores fix(site_scores)
+species_scores=scores_idealmod_combo3$species #separating out the species scores
+fix(species_scores)
+site_scores_environment=cbind(site_scores,Env_noNAs_nonred) #calculating loadings/environmental correlations with the axes
+correlations=cor(site_scores_environment, use="na.or.complete")
+correlations2=correlations[3:10,1:2]#merge
+correlations2=correlations2[-4,]
+correlations2=correlations2[-6,]
+fix(correlations) #calculate correlations
+write.table(correlations,file="Correlations_mod1.txt",sep="\t")
+
+#dbRDA
+
+dbrda_mod0 <- dbrda(OTU_noNAS ~ 1, Env_noNAs_nonred, distance="bray")  # Model with intercept only
+
+
+dbrda_mod_all <- dbrda(OTU_noNAS ~ ., Env_noNAs_nonred, distance="bray")  # Model with all explanatory variables
+
+#find redundant (collinear) variables to remove
+vif.cca(dbrda_mod_all)
+#try without C.N, temp and, salinity
+Env_dbrda_1=Env_noNAs_nonred[,-c(7,11:12)]
+dbrda_mod_1 <- dbrda(OTU_noNAS ~ ., Env_dbrda_1, distance="bray")  # Model with all explanatory variables
+vif.cca(dbrda_mod_1)
+
+dbrda_mod1_ordi=ordistep(dbrda_mod0, scope = formula(dbrda_mod_1, trace = FALSE))
+#Step: OTU_noNAS ~ Depth + d15N + SC_Porosity + Phaeo + chlphsum + d13C
+
+
+dbrda_mod2=dbrda(OTU_noNAS ~ Depth + d15N + SC_Porosity + Phaeo + chlphsum + d13C, Env_noNAs_nonred, distance="bray", na.action=na.exclude)
+vif.cca(dbrda_mod2) #looks good
+anova(dbrda_mod2, by="term", permu=999)
+#all sig
+
+anova(dbrda_mod2, by="margin", permu=999)
+#all sig
+
+anova(dbrda_mod2, by="axis", permu=999)
+#1-4 sig
+
+plot(dbrda_mod2, type="n")
+points(dbrda_mod2, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(dbrda_mod2, dis="cn")
+
+#The functions finds the adjusted R-square.
+RsquareAdj(dbrda_mod2)
+
+#is a generic function which extracts model coefficients from objects returned by modeling functions
+coef(dbrda_mod2)
+
+goodness(dbrda_mod2, addprevious = TRUE, display="sites")
+   goodness(dbrda_mod2, addprevious = TRUE, summ = TRUE, display="sites")
+
+   inertcomp(dbrda_mod2, prop = TRUE,display="sites")
+
+   ## overall tests
+    adonis2(OTU_noNAS ~ Depth + d15N + SC_Porosity + Phaeo + chlphsum + d13C, data = Env_noNAs_nonred, by = NULL, method="bray")
+#         Df SumOfSqs      R2      F Pr(>F)
+#Model     6   5.2531 0.29581 4.4108  0.001 ***
+#Residual 63  12.5052 0.70419
+#Total    69  17.7582 1.00000
+
+hatvalues(dbrda_mod2)
+    plot(hatvalues(dbrda_mod2), type = "h")
+
+    plot(dbrda_mod2, type = "n")
+    ordispider(dbrda_mod2)       # segment from LC to WA scores
+    points(dbrda_mod2, dis="si", cex=5*hatvalues(dbrda_mod2), pch=21, bg=2) # WA scores
+    text(dbrda_mod2, dis="bp", col=4)
+
+  vcov(dbrda_mod2)
+  vcov(dbrda_mod2, complete='mlm')
+
+ordiplot(dbrda_mod2,ellipse=TRUE,choices=c(3,4), groups=Env_noNAs$clusters)
+biplot(dbrda_mod2,ellipse=TRUE,choices=c(3,4),labels=rownames(OTU_noNAS), groups=Env_noNAs$clusters)
+
+#variance paritioning
+OTU_noNAS_dist=vegdist(OTU_noNAS, method="bray")
+varpart_dbrda2 <- varpart(OTU_noNAS_dist, ~ Depth + d15N + SC_Porosity + Phaeo + chlphsum + d13C, ~ Env_noNAs$clusters,
+       data=Env_noNAs_nonred)
+
+
+
+#dblm
+dblmmod2_env=Env_noNAs_nonred[,c(1,3,5:6,10,13)]
+
+#bray curtis dist
+dblm_dbrdamod2 <- dblm(OTU_noNAS_dist,dblmmod2_env)
+dblm_dbrdamod2 $fitted.values
+#sub chlphsum for chla back in
+dbrda_mod3=dbrda(OTU_noNAS ~ Depth + d15N + SC_Porosity + Phaeo + ChlA + d13C, Env_noNAs_nonred, distance="bray", na.action=na.exclude)
+vif.cca(dbrda_mod3) #looks good
+anova(dbrda_mod3, by="term", permu=999)
+#all sig
+
+anova(dbrda_mod3, by="margin", permu=999)
+#all sig
+
+anova(dbrda_mod3, by="axis", permu=999)
+#1-4 sig
+
+plot(dbrda_mod3, type="n")
+points(dbrda_mod3, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(dbrda_mod3, dis="cn")
+
+#do same with capscale with nonredundant variables with cap_mod0
+cap_mod0 <- capscale(OTU_noNAS ~ 1, Env_noNAs_nonred, distance="bray")  # Model with intercept only
+
+
+cap_mod_all <- capscale(OTU_noNAS ~ ., Env_noNAs_nonred, distance="bray")  # Model with all explanatory variables
+
+#find redundant (collinear) variables to remove
+vif.cca(cap_mod_all)
+#try without C.N, temp and, salinity
+Env_cap_1=Env_noNAs_nonred[,-c(7,11:12)]
+cap_mod_1 <- capscale(OTU_noNAS ~ ., Env_cap_1, distance="bray")  # Model with all explanatory variables
+vif.cca(cap_mod_1)
+cap_mod0 <- capscale(OTU_noNAS ~ 1, Env_cap_1, distance="bray")  # Model with intercept only
+
+
+cap_mod1_ordi=ordistep(cap_mod0, scope = formula(cap_mod_1, trace = FALSE))
+#Step: OTU_noNAS ~ Depth + d15N + TON + Phaeo + chlphsum + TOC
+
+
+cap_mod_2=capscale(OTU_noNAS ~ Depth + d15N + TON + Phaeo + chlphsum + TOC, Env_cap_1, distance="bray", na.action=na.exclude)
+vif.cca(cap_mod_2) #looks good
+anova(cap_mod_2, by="term", permu=999)
+#all sig
+
+anova(cap_mod_2, by="margin", permu=999)
+#all sig
+
+anova(cap_mod_2, by="axis", permu=999)
+#1-4 sig
+
+plot(cap_mod_2, type="n")
+points(cap_mod_2, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(cap_mod_2, dis="cn")
+
+adonis2(OTU_noNAS ~ Depth + d15N + TON + Phaeo + chlphsum + TOC, data = Env_noNAs_nonred, by = NULL, method="bray")
+
+adonis(OTU_noNAS ~ Depth + d15N + TON + Phaeo + chlphsum + TOC, data = Env_noNAs_nonred, by = NULL, method="bray")
+
+#try without TOC
+#add d13C and chla
+cap_mod_3=capscale(OTU_noNAS ~ Depth + d15N + TON + Phaeo + chlphsum + d13C + ChlA, Env_cap_1, distance="bray", na.action=na.exclude)
+
+
+cap_mod3_ordi=ordistep(cap_mod0, scope = formula(cap_mod_3, trace = FALSE))
+#Step:OTU_noNAS ~ Depth + d15N + TON + Phaeo + chlphsum
+
+cap_mod_4=capscale(OTU_noNAS ~ Depth + d15N + TON + Phaeo + chlphsum, Env_cap_1, distance="bray", na.action=na.exclude)
+
+
+vif.cca(cap_mod_4) #looks good
+anova(cap_mod_4, by="term", permu=999)
+#all sig
+
+anova(cap_mod_4, by="margin", permu=999)
+#all sig
+
+anova(cap_mod_4, by="axis", permu=999)
+#1-4 sig
+
+plot(cap_mod_4, type="n")
+points(cap_mod_4, pch = 21, cex = 2, col = boxes[OTU_env_noNAs$clusters], bg=boxes[OTU_env_noNAs$clusters])
+text(cap_mod_4, dis="cn")
+
+adonis2(OTU_noNAS ~ , data = Env_noNAs_nonred, by = NULL, method="bray")
+
+adonis(OTU_noNAS ~ , data = Env_noNAs_nonred, by = NULL, method="bray")
+RsquareAdj(cap_mod_4)
+
+cap_mod_5=capscale(OTU_noNAS ~ Depth + d15N + TON + Phaeo + chlphsum + ChlA, Env_cap_1, distance="bray", na.action=na.exclude)
+vif.cca(cap_mod_5) #looks good
+anova(cap_mod_5, by="term", permu=999)
+RsquareAdj(cap_mod_5)
+
+
+#######capscale with more samples
+
+cap_mod0 <- capscale(BA_otutax_t ~ 1, env_PCA, distance="bray")  # Model with intercept only
+
+
+cap_mod_all <- capscale(BA_otutax_t ~ ., env_PCA, distance="bray")  # Model with all explanatory variables
+
+#find redundant (collinear) variables to remove
+vif.cca(cap_mod_all)
+
+#remove C:N (-7), temp , and sal
+# without tmep and sal removed: Sal + Temp + chlphsum + ChlA + TOC + Depth + TN + d13C + SC_Porosity
+
+
+cap_mod0 <- capscale(BA_otutax_t ~ 1, env_PCA[,-c(7,11:12)], distance="bray")  # Model with intercept only
+
+
+cap_mod_all <- capscale(BA_otutax_t ~ ., env_PCA[,-c(7,11:12)], distance="bray")  # Model with all explanatory variables except C:N
+#find redundant (collinear) variables to remove
+vif.cca(cap_mod_all)
+
+cap_all_ordi=ordistep(cap_mod0, scope = formula(cap_mod_all, trace = FALSE))
+
+#Depth + d15N + Phaeo + ChlA + SC_Porosity + TOC + d13C
+
+cap_mod_ideal=capscale(BA_otutax_t ~ Depth + d15N + Phaeo + ChlA + SC_Porosity + TOC + d13C, env_PCA, distance="bray", na.action=na.exclude)
+vif.cca(cap_mod_ideal) #looks good
+anova(cap_mod_ideal, by="term", permu=999)
+#all sig
+
+anova(cap_mod_ideal, by="margin", permu=999)
+#all sig
+
+anova(cap_mod_ideal, by="axis", permu=999)
+#3 axis significant
+
+ordiplot(cap_mod_ideal, choices = c(1, 2), display="sites")
+ordiplot(cap_mod_ideal, choices = c(2, 4), display="sites")
+points (cap_mod_ideal,choices = c(2, 4), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+
+ordiplot(cap_mod_ideal, choices = c(1, 2), display="sites")
+points (cap_mod_ideal,choices = c(1, 2), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+
+ordiplot(cap_mod_ideal, choices = c(1, 3), display="sites")
+points (cap_mod_ideal,choices = c(1, 3), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+#shows within groups variation for BCD assemablages
+
+svg("CAP1_3.svg")
+plot(cap_mod_ideal, choices = c(1, 3), display="sites")
+points (cap_mod_ideal,choices = c(1, 3), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(1, 3),dis="cn")
+dev.off()
+
+svg("CAP1_4.svg")
+plot(cap_mod_ideal, choices = c(1, 4), display="sites")
+points(cap_mod_ideal,choices = c(1, 4), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(1, 4),dis="cn")
+dev.off()
+#shows within groups variation for ABC assemablages
+
+plot(cap_mod_ideal, choices = c(1, 4), display="sites")
+points(cap_mod_ideal,choices = c(1, 4), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(1, 4))
+
+plot(cap_mod_ideal, choices = c(1,4), display="sites")
+points(cap_mod_ideal,choices = c(1, 4), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(1,4), dis="sites")
+
+plot(cap_mod_ideal, choices = c(1,2), display="sites")
+points(cap_mod_ideal,choices = c(1, 2), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(1,2), dis="sites")
+
+plot(cap_mod_ideal, choices = c(2,3), display="sites")
+points(cap_mod_ideal,choices = c(2, 3), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(2,3), dis="sites")
+
+svg("CAP2_3.svg")
+plot(cap_mod_ideal, choices = c(2, 3), display="sites")
+points (cap_mod_ideal,choices = c(2, 3), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(2, 3),dis="cn")
+dev.off()
+
+plot(cap_mod_ideal, choices = c(2, 3), display="sites")
+points (cap_mod_ideal,choices = c(2, 3), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(2, 3))
+
+plot(cap_mod_ideal, choices = c(2, 4), display="sites")
+points(cap_mod_ideal,choices = c(2, 4), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(2, 4),dis="cn")
+
+
+plot(cap_mod_ideal, choices = c(3, 4), display="sites")
+points(cap_mod_ideal,choices = c(3, 4), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(3, 4),dis="cn")
+
+
+ordiplot3d(cap_mod_ideal, choices = c(1:3), display="sites")
+points(cap_mod_ideal,choices = c(1, 3), pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, choices = c(1, 3),dis="cn")
+
+ordirgl(cap_mod_ideal, choices = c(1:3), display="sites")
+
+ordirgl(cap_mod_ideal, display = "sites", choices = 1:3, type = "p", col = boxes[metadata$clusters],
+    ax.col = "black", arr.col = "white")
+
+
+svg("CAP.svg")
+plot(cap_mod_ideal, type="n")
+points(cap_mod_ideal, pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ideal, dis="cn")
+dev.off()
+
+adonis2(BA_otutax_t ~ Depth + d15N + Phaeo + ChlA + SC_Porosity + TOC + d13C, data = env_PCA[,-c(7,11:12)], by = NULL, method="bray")
+#r2 = 0.25
+adonis(BA_otutax_t ~ Depth + d15N + Phaeo + ChlA + SC_Porosity + TOC + d13C, data = env_PCA[,-c(7,11:12)], by = NULL, method="bray")
+RsquareAdj(cap_mod_ideal)
+#0.1776557
+
+names(scores(cap_mod_ideal)) # getting the scores
+summary(cap_mod_ideal)
+scores(cap_mod_ideal, choices=c(1,2,3,4)) #get CAP 1,2,3,4
+scores.rda(cap_mod_ideal)
+scores_cap_mod_ideal=scores(cap_mod_ideal, choices=c(1,2,3,4)) #getting the scores from the analysis; notice species and sites are together
+site_scores=scores_cap_mod_ideal$sites #separating out the site scores;  scores fix(site_scores)
+species_scores=scores_cap_mod_ideal$species #separating out the species scores
+fix(species_scores)
+site_scores_environment=cbind(site_scores,env_PCA) #calculating loadings/environmental correlations with the axes
+correlations=cor(site_scores_environment, use="na.or.complete")
+correlations2=correlations[c(5:7,9:11,13),1:4]#merge
+correlations2=correlations2[-8,]
+correlations2=correlations2[-4,]
+
+fix(correlations) #calculate correlations
+write.table(correlations2,file="Correlations_mod_ideal.txt",sep="\t")
+
+#try with chla/TOC
+metadata <- transform(metadata, chla_TOC = ChlA / TOC)
+
+
+#remove C:N (-7), temp , and sal
+
+env_PCA=metadata[,-c(2:3,9,13:17)]
+
+cap_mod0_ratio <- capscale(BA_otutax_t ~ 1, env_PCA, distance="bray")  # Model with intercept only
+
+
+cap_mod_all_ratio <- capscale(BA_otutax_t ~ ., env_PCA, distance="bray")  # Model with all explanatory variables except C:N
+#find redundant (collinear) variables to remove
+vif.cca(cap_mod_all)
+
+cap_ratio_ordi=ordistep(cap_mod0, scope = formula(cap_mod_all, trace = FALSE))
+
+#Depth + d15N + Phaeo + ChlA + SC_Porosity + TOC + d13C
+
+cap_mod_ratio=capscale(BA_otutax_t ~ Depth + d15N + Phaeo + SC_Porosity + chla_TOC + chlphsum + d13C, env_PCA, distance="bray", na.action=na.exclude)
+vif.cca(cap_mod_ratio) #looks good
+anova(cap_mod_ratio, by="term", permu=999)
+#all sig
+
+plot(cap_mod_ratio, type="n")
+points(cap_mod_ratio, pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_ratio, dis="cn")
+
+####with longitude
+env_PCA_long=metadata[,-c(2,9,13:17)]
+
+cap_mod0_long <- capscale(BA_otutax_t ~ 1, env_PCA_long, distance="bray")  # Model with intercept only
+
+
+cap_mod_all_long <- capscale(BA_otutax_t ~ ., env_PCA_long, distance="bray")  # Model with all explanatory variables except C:N
+#find redundant (collinear) variables to remove
+vif.cca(cap_mod_all_long)
+
+cap_long_ordi=ordistep(cap_mod0_long, scope = formula(cap_mod_all_long, trace = FALSE))
+
+#Depth + Longitude + chla_TOC + TOC + Phaeo + d13C + TN
+
+cap_mod_long=capscale(BA_otutax_t ~ Depth + Longitude + chla_TOC + TOC + Phaeo + d13C + TN, env_PCA_long, distance="bray", na.action=na.exclude)
+vif.cca(cap_mod_long) #looks good
+anova(cap_mod_long, by="term", permu=999)
+#all sig
+
+plot(cap_mod_long, type="n")
+points(cap_mod_long, pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_long, dis="cn")
+
+adonis2(BA_otutax_t ~ Depth + Longitude + chla_TOC + TOC + Phaeo + d13C + TN, env_PCA_long, by = NULL, method="bray")
+#r2 = 0.25
+adonis(BA_otutax_t ~ Depth + Longitude + chla_TOC + TOC + Phaeo + d13C + TN, env_PCA_long, by = NULL, method="bray")
+RsquareAdj(cap_mod_long)
+#0.1776557
+
+#distance between sites
+library(geosphere)
+#distance between furthest poitns
+furthest=metadata[c(34,73),c(3:2)]
+distVincentyEllipsoid(furthest, a=6378137, b=6356752.3142, f=1/298.257223563)
+#1228994
+#1229 km
+
+# create distance matrix
+geo_dist=distVincentyEllipsoid(metadata[,c(3:2)], a=6378137, b=6356752.3142, f=1/298.257223563)
+
+spat_dist <- dist(geo_dist)
+
+
+
+spat.dist<-dist(data.frame(metadata$Longitude, metadata$Latitude))
+plot(BA_otutax_dist,distm(metadata[,c(3:2)]))
+plot(spat.dist, BA_otutax_dist, ylim=c(0,1), xlim=c(0, max(spat.dist)))
+lm(spat.dist~ BA_otutax_dist)
+lm(BA_otutax_dist~spat.dist)
+
+plot(spat_dist, BA_otutax_dist, ylim=c(0,1), xlim=c(0, max(spat_dist)))
+
+plot(ln(spat.dist), ln(BA_otutax_dist), ylim=c(0,1), xlim=c(0, max(ln(spat.dist))))
+
+adonis(BA_otutax_t ~ Depth + d15N + Phaeo + ChlA + SC_Porosity + TOC + d13C +Longitude + Latitude,metadata, by = NULL, method="bray")
+
+##try with total matter
+metadata$TOCTNsum=metadata$TOC + metadata$TN
+
+cap_mod0_tntoc <- capscale(BA_otutax_t ~ 1, metadata, distance="bray")  # Model with intercept only
+
+
+cap_mod_all_tntoc <- capscale(BA_otutax_t ~ ., metadata, distance="bray")  # Model with all explanatory variables except C:N
+#find redundant (collinear) variables to remove
+vif.cca(cap_mod_all_tntoc)
+
+
+cap_mod_tntoc<-capscale(BA_otutax_t ~ Depth + d15N + Phaeo + ChlA + SC_Porosity + TOCTNsum + d13C, metadata, distance="bray")
+vif.cca(cap_mod_tntoc) #looks good
+anova(cap_mod_tntoc, by="term", permu=999)
+RsquareAdj(cap_mod_tntoc)
+
+plot(cap_mod_tntoc, type="n")
+points(cap_mod_tntoc, pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_tntoc, dis="cn")
+
+#pressure calculation
+((/10.06)* 14.5)
+
+metadata$Pressure = sapply(metadata[,1], function(x) ((x/10.06)* 14.5))
+
+cap_mod_press<-capscale(BA_otutax_t ~ Pressure + d15N + Phaeo + ChlA + SC_Porosity + TOC + d13C, metadata, distance="bray")
+vif.cca(cap_mod_press) #looks good
+anova(cap_mod_press, by="term", permu=999)
+RsquareAdj(cap_mod_press)
+
+plot(cap_mod_press, type="n")
+points(cap_mod_press, pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_press, dis="cn")
+
+#####supp figure indicator taxa
+#A
+a_multipatt<-read.delim("A_multipatt.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+a_multipatt$famgen<- paste(a_multipatt$Family,"_",a_multipatt$Genus)
+a_multipatt["Total"] <- 1
+
+a_multipatt_agg = ddply(a_multipatt[,c(8:9)],"famgen",numcolwise(sum))
+write.table(a_multipatt_agg,file="a_multipatt_agg.txt",sep="\t")
+
+#C
+c_multipatt<-read.delim("C_multipatt.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+c_multipatt$famgen<- paste(c_multipatt$Family,"_",c_multipatt$Genus)
+c_multipatt["Total"] <- 1
+
+c_multipatt_agg = ddply(c_multipatt[,c(8:9)],"famgen",numcolwise(sum))
+write.table(c_multipatt_agg,file="c_multipatt_agg.txt",sep="\t")
+
+#D
+d_multipatt<-read.delim("D_multipatt.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+d_multipatt$famgen<- paste(d_multipatt$Family,"_",d_multipatt$Genus)
+d_multipatt["Total"] <- 1
+
+d_multipatt_agg = ddply(d_multipatt[,c(8:9)],"famgen",numcolwise(sum))
+write.table(d_multipatt_agg,file="d_multipatt_agg.txt",sep="\t")
+
+#####violin plots
+
+
+Depth=ggplot(metadata, aes(x=clusters, y=Depth)) +
+scale_y_continuous( breaks=seq(0,1200,200), limits=c(0,1200)) +
+    geom_violin(aes(fill = clusters)) +
+    scale_fill_manual(values=boxes)+
+    ylab("Depth(m)")+
+    xlab("Assemblage")+
+    theme_bw(base_size = 18, base_family="Times New Roman")
+
+ChlA=ggplot(metadata, aes(x=clusters, y=ChlA)) +
+         scale_y_continuous( breaks=seq(0,14,2), limits=c(0,14)) +
+         geom_violin(aes(fill = clusters)) +
+         scale_fill_manual(values=boxes)+
+         ylab("Chl-a")+
+         xlab("Assemblage")+
+         theme_bw(base_size = 18, base_family="Times New Roman")
+
+Porosity=ggplot(metadata, aes(x=clusters, y=SC_Porosity)) +
+                  scale_y_continuous( breaks=seq(0.2,1.0,0.2), limits=c(0.2,1.0)) +
+                  geom_violin(aes(fill = clusters)) +
+                  scale_fill_manual(values=boxes)+
+                  ylab("Porosity")+
+                  xlab("Assemblage")+
+                  theme_bw(base_size = 18, base_family="Times New Roman")
+
+Phaeopigment=ggplot(metadata, aes(x=clusters, y=Phaeo)) +
+                  scale_y_continuous( breaks=seq(0,24,2), limits=c(0,24)) +
+                      geom_violin(aes(fill = clusters)) +
+                      scale_fill_manual(values=boxes)+
+                      ylab("Phaeopigment")+
+                      xlab("Assemblage")+
+                      theme_bw(base_size = 18, base_family="Times New Roman")
+
+D15N=ggplot(metadata, aes(x=clusters, y=d15N)) +
+                      scale_y_continuous( breaks=seq(2,10,2), limits=c(2,10)) +
+                          geom_violin(aes(fill = clusters)) +
+                          scale_fill_manual(values=boxes)+
+                          ylab("d15N")+
+                          xlab("Assemblage")+
+                          theme_bw(base_size = 18, base_family="Times New Roman")
+
+TOC=ggplot(metadata, aes(x=clusters, y=TOC)) +
+                          scale_y_continuous( breaks=seq(0,40,8), limits=c(0,40)) +
+                              geom_violin(aes(fill = clusters)) +
+                              scale_fill_manual(values=boxes)+
+                              ylab("TOC")+
+                              xlab("Assemblage")+
+                              theme_bw(base_size = 18, base_family="Times New Roman")
+
+D13C=ggplot(metadata, aes(x=clusters, y=d13C)) +
+                              scale_y_continuous( breaks=seq(-27,-9,3), limits=c(-27,-9)) +
+                                  geom_violin(aes(fill = clusters)) +
+                                  scale_fill_manual(values=boxes)+
+                                  ylab("d13C")+
+                                  xlab("Assemblage")+
+                                  theme_bw(base_size = 18, base_family="Times New Roman")
+
+Sal=ggplot(metadata, aes(x=clusters, y=Sal)) +
+            scale_y_continuous( breaks=seq(30,35,1), limits=c(30,35)) +
+            geom_violin(aes(fill = clusters)) +
+            scale_fill_manual(values=boxes)+
+            ylab("Salinity")+
+            xlab("Assemblage")+
+            theme_bw(base_size = 18, base_family="Times New Roman")
+
+
+svg("Depth.svg")
+Depth
+dev.off()
+
+svg("D15N.svg")
+D15N
+dev.off()
+
+svg("Porosity.svg")
+Porosity
+dev.off()
+
+svg("TOC.svg")
+TOC
+dev.off()
+
+svg("ChlA.svg")
+ChlA
+dev.off()
+
+svg("Phaeo.svg")
+Phaeopigment
+dev.off()
+
+svg("D13C.svg")
+D13C
+dev.off()
+
+svg("Sal.svg")
+Sal
+dev.off()
+
+##
+Verruc<-subset(BA_otutax, grepl("Verrucomicrobia", BA_otutax$Class))
+Verruc_fam_agg=ddply(Verruc[,c(90:92)],"Family",numcolwise(sum))
+Verruc_fam_agg[with(Verruc_fam_agg, order(-Total)), ]
+Verruc_gen_agg=ddply(Verruc[,c(91:92)],"Genus",numcolwise(sum))
+Verruc_gen_agg[with(Verruc_gen_agg, order(-Total)), ]
+
+CPR<-subset(BA_otutax, grepl("Candid", BA_otutax$Phylum))
+
+#Desulfuromonadales
+Desulfuromonadales<-subset(BA_otutax, grepl("Desulfuromonadales", BA_otutax$Order))
+Desulfo_fam_agg=ddply(Desulfuromonadales[,c(90:92)],"Family",numcolwise(sum))
+
+Sva1033<-subset(BA_otutax, grepl("Sva1033", BA_otutax$Family))
+Sva1033_gen_agg=ddply(Sva1033[,c(91:92)],"Genus",numcolwise(sum))
+
+Dehalo<-subset(BA_otutax, grepl("Dehalococcoidia", BA_otutax$Class))
+Dehalo_order_agg=ddply(Dehalo[,c(89:92)],"Order",numcolwise(sum))
+
+sar202<-subset(BA_otutax, grepl("SAR202", BA_otutax$Order))
+sar202_gen_agg=ddply(sar202[,c(90:92)],"Genus",numcolwise(sum))
+
+sar324<-subset(BA_otutax, grepl("SAR324", BA_otutax$Order))
+sar324_gen_agg=ddply(sar324[,c(90:92)],"Genus",numcolwise(sum))
+
+Pir<-subset(BA_otutax, grepl("Pirellulaceae", BA_otutax$Family))
+Pir_gen_agg=ddply(Pir[,c(90:92)],"Genus",numcolwise(sum))
+Pir_gen_agg[with(Pir_gen_agg, order(-Total)), ]
+
+Rhodo<-subset(BA_otutax, grepl("Rhodobacteraceae", BA_otutax$Family))
+Rhodo_gen_agg=ddply(Rhodo[,c(90:92)],"Genus",numcolwise(sum))
+Rhodo_gen_agg[with(Rhodo_gen_agg, order(-Total)), ]
+
+Rub<-subset(BA_otutax, grepl("Rubritaleaceae", BA_otutax$Family))
+Rub_gen_agg=ddply(Rub[,c(90:92)],"Genus",numcolwise(sum))
+Rub_gen_agg[with(Rub_gen_agg, order(-Total)), ]
+
+kilon<-subset(BA_otutax, grepl("Kiloniellaceae", BA_otutax$Family))
+kilon_gen_agg=ddply(kilon[,c(90:92)],"Genus",numcolwise(sum))
+kilon_gen_agg[with(kilon_gen_agg, order(-Total)), ]
+
+Thermo<-subset(BA_otutax, grepl("Thermoanaerobaculaceae", BA_otutax$Family))
+Thermo_gen_agg=ddply(Thermo[,c(90:92)],"Genus",numcolwise(sum))
+Thermo_gen_agg[with(Thermo_gen_agg, order(-Total)), ]
+
+Thermo<-subset(BA_otutax, grepl("Thermoanaerobaculaceae", BA_otutax$Family))
+Thermo_gen_agg=ddply(Thermo[,c(90:92)],"Genus",numcolwise(sum))
+Thermo_gen_agg[with(Thermo_gen_agg, order(-Total)), ]
+
+Flavo<-subset(BA_otutax, grepl("Flavobacteriaceae", BA_otutax$Family))
+Flavo_gen_agg=ddply(Flavo[,c(90:92)],"Genus",numcolwise(sum))
+Flavo_gen_agg[with(Flavo_gen_agg, order(-Total)), ]
+
+#Halieaceae
+Hal<-subset(BA_otutax, grepl("Halieaceae", BA_otutax$Family))
+Hal_gen_agg=ddply(Hal[,c(90:92)],"Genus",numcolwise(sum))
+Hal_gen_agg[with(Hal_gen_agg, order(-Total)), ]
+
+BD7<-subset(BA_otutax, grepl("BD7", BA_otutax$Family))
+BD7_gen_agg=ddply(BD7[,c(90:92)],"Genus",numcolwise(sum))
+BD7_gen_agg[with(BD7_gen_agg, order(-Total)), ]
+
+#Magnetospiraceae
+Mag<-subset(BA_otutax, grepl("Magnetospiraceae", BA_otutax$Family))
+Mag_gen_agg=ddply(Mag[,c(90:92)],"Genus",numcolwise(sum))
+Mag_gen_agg[with(Mag_gen_agg, order(-Total)), ]
+
+#SBR1031
+SBR1031<-subset(BA_otutax, grepl("SBR1031", BA_otutax$Family))
+SBR1031_gen_agg=ddply(SBR1031[,c(90:92)],"Genus",numcolwise(sum))
+SBR1031_gen_agg[with(SBR1031_gen_agg, order(-Total)), ]
+
+#PHOS-HE36
+PHOSHE36<-subset(BA_otutax, grepl("PHOS-HE36", BA_otutax$Family))
+PHOSHE36_gen_agg=ddply(PHOSHE36[,c(90:92)],"Genus",numcolwise(sum))
+PHOSHE36_gen_agg[with(PHOSHE36_gen_agg, order(-Total)), ]
+
+#WCHB1-41
+WCHB141<-subset(BA_otutax, grepl("WCHB1-41", BA_otutax$Family))
+WCHB141_gen_agg=ddply(WCHB141[,c(90:92)],"Genus",numcolwise(sum))
+WCHB141_gen_agg[with(WCHB141_gen_agg, order(-Total)), ]
+
+bulb<-subset(BA_otutax, grepl("Desulfobulbaceae", BA_otutax$Family))
+bulb_gen_agg=ddply(bulb[,c(90:92)],"Genus",numcolwise(sum))
+bulb_gen_agg[with(bulb_gen_agg, order(-Total)), ]
+
+bact<-subset(BA_otutax, grepl("Desulfobacteraceae", BA_otutax$Family))
+bact_gen_agg=ddply(bact[,c(90:92)],"Genus",numcolwise(sum))
+bact_gen_agg[with(bact_gen_agg, order(-Total)), ]
+
+psychro<-subset(BA_otutax, grepl("Psychromonadaceae", BA_otutax$Family))
+psychro_gen_agg=ddply(psychro[,c(90:92)],"Genus",numcolwise(sum))
+psychro_gen_agg[with(psychro_gen_agg, order(-Total)), ]
+
+nitrosop<-subset(BA_otutax, grepl("Nitrosopumilaceae", BA_otutax$Family))
+nitrosop_gen_agg=ddply(nitrosop[,c(90:92)],"Genus",numcolwise(sum))
+nitrosop_gen_agg[with(nitrosop_gen_agg, order(-Total)), ]
+
+methyls<-subset(BA_otutax, grepl("Methyl", BA_otutax$Genus))
+methyls_gen_agg=ddply(methyls[,c(90:92)],"Genus",numcolwise(sum))
+
+
+methano<-subset(BA_otutax, grepl("Methanosarcinales", BA_otutax$Order))
+methano_gen_agg=ddply(methano[,c(90:92)],"Genus",numcolwise(sum))
+
+Desulfobact<-subset(BA_otutax, grepl("Desulfobacteraceae", BA_otutax$Family))
+Desulfobact_gen_agg=ddply(Desulfobact[,c(90:92)],"Genus",numcolwise(sum))
+
+Verruco<-subset(BA_otutax, grepl("Verruco", BA_otutax$Class))
+Verruco_gen_agg=ddply(Verruco[,c(90:92)],"Genus",numcolwise(sum))
+Verruco_gen_agg[with(Verruco_gen_agg, order(-Total)), ]
+
+Gemma<-subset(BA_otutax, grepl("Gemmatimonadetes", BA_otutax$Class))
+Gemma_gen_agg=ddply(Gemma[,c(90:92)],"Genus",numcolwise(sum))
+
+Bacilli<-subset(BA_otutax, grepl("Bacilli", BA_otutax$Class))
+Gemma_gen_agg=ddply(Gemma[,c(90:92)],"Genus",numcolwise(sum))
+
+
+
+
+methyl<-subset(BA_otutax, grepl("Methyloligellaceae", BA_otutax$Family))
+methyl_gen_agg=ddply(methyl[,c(90:92)],"Genus",numcolwise(sum))
+methyl_gen_agg[with(methyl_gen_agg, order(-Total)), ]
+
+woe<-subset(BA_otutax, grepl("Woeseiaceae", BA_otutax$Family))
+woe_gen_agg=ddply(woe[,c(90:92)],"Genus",numcolwise(sum))
+woe_gen_agg[with(woe_gen_agg, order(-Total)), ]
+
+NB1j<-subset(BA_otutax, grepl("NB1-j", BA_otutax$Family))
+NB1j_gen_agg=ddply(NB1j[,c(90:92)],"Genus",numcolwise(sum))
+NB1j_gen_agg[with(NB1j_gen_agg, order(-Total)), ]
+
+actino<-subset(BA_otutax, grepl("Actinomarinales", BA_otutax$Family))
+
+Anaerolin<-subset(BA_otutax, grepl("Anaerolineaceae", BA_otutax$Family))
+Anaerolin_gen_agg=ddply(Anaerolin[,c(90:92)],"Genus",numcolwise(sum))
+Anaerolin_gen_agg[with(Anaerolin_gen_agg, order(-Total)), ]
+
+verruc<-subset(BA_otutax, grepl("Verrucomicrobiae", BA_otutax$Class))
+verruc_fam_agg=ddply(verruc[,c(90:92)],"Family",numcolwise(sum))
+verruc_fam_agg[with(verruc_fam_agg, order(-Total)), ]
+
+broc<-subset(BA_otutax, grepl("Brocadia", BA_otutax$Genus))
+broc_gen_agg=ddply(broc[,c(91:92)],"Genus",numcolwise(sum))
+
+kuen<-subset(BA_otutax, grepl("Kuenenia", BA_otutax$Genus))
+jett<-subset(BA_otutax, grepl("Jettenia", BA_otutax$Genus))
+
+
+
+acido<-subset(BA_otutax, grepl("Acidobacteria", BA_otutax$Phylum))
+subgroups<-subset(acido, grepl("Subgroup", acido$Class))
+sub_gen_agg=ddply(subgroups[,c(88:92)],"Class",numcolwise(sum))
+sub10<-subset(acido, grepl("Subgroup_10", acido$Genus))
+sub10t=as.data.frame(t(sub10[,c(1:85)]))
+sub10t$Subgroup_10 <- rowSums(sub10t)
+sub10_latlong <- merge(sub10t,metadata[,c(2:3)],by="row.names",all.x=TRUE)
+sub10_latlong=sub10_latlong[,c(4073:4075)]
+
+write.table(sub10_latlong,file="sub10_latlong.txt",sep="\t")
+
+scal<-subset(BA_otutax, grepl("Candidatus_Scalindua", BA_otutax$Genus))
+scalt=as.data.frame(t(scal[,c(1:85)]))
+scalt$Scalindua <- rowSums(scalt)
+scal_latlong <- merge(scalt,metadata[,c(2:3)],by="row.names",all.x=TRUE)
+scal_latlong=scal_latlong[,c(892:894)]
+write.table(scal_latlong,file="scal_latlong.txt",sep="\t")
+
+Nitrosop<-subset(BA_otutax, grepl("Nitrosopumilaceae", BA_otutax$Family))
+Nitrosopt=as.data.frame(t(Nitrosop[,c(1:85)]))
+Nitrosopt$Nitrosopumilaceae <- rowSums(Nitrosopt)
+Nitrosop_latlong <- merge(Nitrosopt,metadata[,c(2:3)],by="row.names",all.x=TRUE)
+names(Nitrosop_latlong)
+Nitrosop_latlong=Nitrosop_latlong[,c(7926:7928)]
+write.table(Nitrosop_latlong,file="Nitrosop_latlong.txt",sep="\t")
+
+nitrospira<-subset(BA_otutax, grepl("Nitrospira", BA_otutax$Genus))
+nitrospirat=as.data.frame(t(nitrospira[,c(1:85)]))
+nitrospirat$nitrospira <- rowSums(nitrospirat)
+nitrospira_latlong <- merge(nitrospirat,metadata[,c(2:3)],by="row.names",all.x=TRUE)
+nitrospira_latlong=nitrospira_latlong[,c(947:949)]
+write.table(nitrospira_latlong,file="nitrospira_latlong.txt",sep="\t")
+
+Sulfurimonas<-subset(BA_otutax, grepl("Sulfurimonas", BA_otutax$Genus))
+Sulfurimonast=as.data.frame(t(Sulfurimonas[,c(1:85)]))
+Sulfurimonast$Sulfurimonas <- rowSums(Sulfurimonast)
+Sulfurimonas_latlong <- merge(Sulfurimonast,metadata[,c(2:3)],by="row.names",all.x=TRUE)
+ncol(Sulfurimonast)
+ncol(Sulfurimonas_latlong)
+Sulfurimonas_latlong=Sulfurimonas_latlong[,c(178:180)]
+write.table(Sulfurimonas_latlong,file="Sulfurimonas_latlong.txt",sep="\t")
+
+Cocleimonas<-subset(BA_otutax, grepl("Cocleimonas", BA_otutax$Genus))
+Cocleimonast=as.data.frame(t(Cocleimonas[,c(1:85)]))
+Cocleimonast$Cocleimonas <- rowSums(Cocleimonast)
+Cocleimonas_latlong <- merge(Cocleimonast,metadata[,c(2:3)],by="row.names",all.x=TRUE)
+ncol(Cocleimonast)
+ncol(Cocleimonas_latlong)
+Cocleimonas_latlong=Cocleimonas_latlong[,c(324:326)]
+write.table(Cocleimonas_latlong,file="Cocleimonas_latlong.txt",sep="\t")
+
+olei<-subset(BA_otutax, grepl("Oleispira", BA_otutax$Genus))
+olei=as.data.frame(t(olei[,c(1:85)]))
+olei$Oleispira<- rowSums(olei)
+olei_latlong <- merge(olei,metadata[,c(2:3)],by="row.names",all.x=TRUE)
+olei_latlong=olei_latlong[,c(45:47)]
+write.table(olei_latlong,file="olei_latlong.txt",sep="\t")
+
+cyclo<-subset(BA_otutax, grepl("Cycloclasticus", BA_otutax$Genus))
+cyclo=as.data.frame(t(cyclo[,c(1:85)]))
+cyclo$cyclospira<- rowSums(cyclo)
+cyclo_latlong <- merge(cyclo,metadata[,c(2:3)],by="row.names",all.x=TRUE)
+cyclo_latlong=cyclo_latlong[,c(7:9)]
+write.table(cyclo_latlong,file="cyclo_latlong.txt",sep="\t")
+
+zhong<-subset(BA_otutax, grepl("Zhongshania", BA_otutax$Genus))
+zhong=as.data.frame(t(zhong[,c(1:85)]))
+zhong$zhongspira<- rowSums(zhong)
+zhong_latlong <- merge(zhong,metadata[,c(2:3)],by="row.names",all.x=TRUE)
+zhong_latlong=zhong_latlong[,c(3:5)]
+write.table(zhong_latlong,file="zhong_latlong.txt",sep="\t")
+
+nept<-subset(BA_otutax, grepl("Neptuniibacter", BA_otutax$Genus))
+roseo<-subset(BA_otutax, grepl("Roseobacter_clade_NAC11-7_lineage", BA_otutax$Genus))
+roseo=as.data.frame(t(roseo[,c(1:85)]))
+roseo$roseospira<- rowSums(roseo)
+roseo_latlong <- merge(roseo,metadata[,c(2:3)],by="row.names",all.x=TRUE)
+roseo_latlong=roseo_latlong[,c(104:106)]
+write.table(roseo_latlong,file="roseo_latlong.txt",sep="\t")
+
+magnets<-subset(BA_otutax, grepl("Magn", BA_otutax$Genus))
+magnets_gen_agg=ddply(magnets[,c(91:92)],"Genus",numcolwise(sum))
+
+desulfvib<-subset(BA_otutax, grepl("Desulfovibrio", BA_otutax$Genus))
+magnets_gen_agg=ddply(magnets[,c(91:92)],"Genus",numcolwise(sum))
+
+
+
+
+
+
+#methyl singletons doubletons
+methyl_genall<-subset(BA_otutax, grepl("Methyloceanibacter", BA_otutax$Genus))
+methyl_genall_agg=ddply(methyl_genall[,c(90:92)],"Genus",numcolwise(sum))
+methyl_genall_agg[with(methyl_genall_agg, order(-Total)), ]
+#13850
+
+#no singletons
+methyl_genns<-subset(BA_otutax_ns, grepl("Methyloceanibacter", BA_otutax_ns$Genus))
+methyl_genns_agg=ddply(methyl_genns[,c(90:92)],"Genus",numcolwise(sum))
+methyl_genns_agg[with(methyl_genns_agg, order(-Total)), ]
+#12809
+
+#no singletons or doubletons
+methyl_gennsd<-subset(BA_otutax_nsd, grepl("Methyloceanibacter", BA_otutax_nsd$Genus))
+methyl_gennsd_agg=ddply(methyl_gennsd[,c(90:92)],"Genus",numcolwise(sum))
+methyl_gennsd_agg[with(methyl_gennsd_agg, order(-Total)), ]
+#1393
+
+#indicator taxa otu table
+
+
+#AB clusts
+AB_clusts<-read.delim("AB_clusts.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+rownames(AB_clusts)<-AB_clusts[,1]
+AB_clusts<-AB_clusts[,-1]
+
+AB_clusts_tax <- merge(AB_clusts,BA_otutax[,c(89:91)],by="row.names",all.x=TRUE)
+AB_clusts_tax["Total"] <- 1
+AB_clusts_tax$fg <- paste(AB_clusts_tax$Family,"_",AB_clusts_tax$Genus)
+AB_fam_agg <- ddply(AB_clusts_tax[,c(7:9)],"Family",numcolwise(sum))
+AB_gen_agg <- ddply(AB_clusts_tax[,c(8,9)],"Genus",numcolwise(sum))
+AB_fg_agg <- ddply(AB_clusts_tax[,c(9:10)],"fg",numcolwise(sum))
+write.table(AB_fg_agg ,file="AB_shared.txt",sep="\t")
+
+#ABD clusts
+ABD_clusts<-read.delim("ABD_clusts.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+rownames(ABD_clusts)<-ABD_clusts[,1]
+ABD_clusts<-ABD_clusts[,-1]
+
+ABD_clusts_tax <- merge(ABD_clusts,BA_otutax[,c(89:91)],by="row.names",all.x=TRUE)
+ABD_clusts_tax["Total"] <- 1
+ABD_clusts_tax$fg <- paste(ABD_clusts_tax$Family,"_",ABD_clusts_tax$Genus)
+ABD_fam_agg <- ddply(ABD_clusts_tax[,c(7:9)],"Family",numcolwise(sum))
+ABD_gen_agg <- ddply(ABD_clusts_tax[,c(8,9)],"Genus",numcolwise(sum))
+ABD_fg_agg <- ddply(ABD_clusts_tax[,c(9:10)],"fg",numcolwise(sum))
+write.table(ABD_fg_agg ,file="ABD_shared.txt",sep="\t")
+
+#BD clusts
+BD_clusts<-read.delim("BD_clusts.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+rownames(BD_clusts)<-BD_clusts[,1]
+BD_clusts<-BD_clusts[,-1]
+
+BD_clusts_tax <- merge(BD_clusts,BA_otutax[,c(89:91)],by="row.names",all.x=TRUE)
+BD_clusts_tax["Total"] <- 1
+BD_clusts_tax$fg <- paste(BD_clusts_tax$Family,"_",BD_clusts_tax$Genus)
+BD_fam_agg <- ddply(BD_clusts_tax[,c(7:9)],"Family",numcolwise(sum))
+BD_gen_agg <- ddply(BD_clusts_tax[,c(8,9)],"Genus",numcolwise(sum))
+BD_fg_agg <- ddply(BD_clusts_tax[,c(9:10)],"fg",numcolwise(sum))
+write.table(BD_fg_agg ,file="BD_shared.txt",sep="\t")
+
+#CD clusts
+CD_clusts<-read.delim("CD_clusts.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+rownames(CD_clusts)<-CD_clusts[,1]
+CD_clusts<-CD_clusts[,-1]
+
+CD_clusts_tax <- merge(CD_clusts,BA_otutax[,c(89:91)],by="row.names",all.x=TRUE)
+CD_clusts_tax["Total"] <- 1
+CD_clusts_tax$fg <- paste(CD_clusts_tax$Family,"_",CD_clusts_tax$Genus)
+CD_fam_agg <- ddply(CD_clusts_tax[,c(7:9)],"Family",numcolwise(sum))
+CD_gen_agg <- ddply(CD_clusts_tax[,c(8,9)],"Genus",numcolwise(sum))
+CD_fg_agg <- ddply(CD_clusts_tax[,c(9:10)],"fg",numcolwise(sum))
+write.table(CD_fg_agg ,file="CD_shared.txt",sep="\t")
+
+#BCD clusts
+BCD_clusts<-read.delim("BCD_clusts.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+rownames(BCD_clusts)<-BCD_clusts[,1]
+BCD_clusts<-BCD_clusts[,-1]
+
+BCD_clusts_tax <- merge(BCD_clusts,BA_otutax[,c(89:91)],by="row.names",all.x=TRUE)
+BCD_clusts_tax["Total"] <- 1
+BCD_clusts_tax$fg <- paste(BCD_clusts_tax$Family,"_",BCD_clusts_tax$Genus)
+BCD_fam_agg <- ddply(BCD_clusts_tax[,c(7:9)],"Family",numcolwise(sum))
+BCD_gen_agg <- ddply(BCD_clusts_tax[,c(8,9)],"Genus",numcolwise(sum))
+BCD_fg_agg <- ddply(BCD_clusts_tax[,c(9:10)],"fg",numcolwise(sum))
+write.table(BCD_fg_agg ,file="BCD_shared.txt",sep="\t")
+
+#look at env variables with indicator taxa only
+ind_gen_aggt=as.data.frame(t(ind_gen_agg))
+ind_ord_aggt=as.data.frame(t(ind_ord_agg))
+ind_fam_aggt=as.data.frame(t(ind_fam_agg))
+ind_class_aggt=as.data.frame(t(ind_class_agg))
+ind_phy_aggt=as.data.frame(t(ind_phy_agg))
+
+ind_gen_aggt$rn=rownames(ind_gen_aggt)
+ind_ord_aggt$rn=rownames(ind_ord_aggt)
+ind_fam_aggt$rn=rownames(ind_fam_aggt)
+ind_class_aggt$rn=rownames(ind_class_aggt)
+ind_phy_aggt$rn=rownames(ind_phy_aggt)
+
+
+
+l=list(ind_gen_aggt,ind_ord_aggt,ind_fam_aggt,ind_class_aggt,ind_phy_aggt)
+
+
+ind_tax_aggt=Reduce(merge, lapply(l, function(x) data.frame(x, rn = row.names(x))))
+rownames(ind_tax_aggt)=ind_tax_aggt[,1]
+ind_tax_aggt=ind_tax_aggt[,-c(1:2)]
+
+cap_mod0_indtax <- capscale(ind_tax_aggt ~ 1, env_PCA[,-c(10:11)], distance="bray")  # Model with intercept only
+
+
+cap_mod_all_indtax <- capscale(BA_otutax_t ~ ., env_PCA[,-c(10:11)], distance="bray")  # Model with all explanatory variables except C:N
+#find redundant (collinear) variables to remove
+vif.cca(cap_mod_all_indtax)
+
+cap_indtax_ordi=ordistep(cap_mod0_indtax, scope = formula(cap_mod_all_indtax, trace = FALSE))
+
+
+
+cap_mod_intax<-capscale(ind_tax_aggt ~ Depth + ChlA + d15N + Phaeo + SC_Porosity, env_PCA[,-c(10:11)], distance="jaccard")
+vif.cca(cap_mod_intax) #looks good
+anova(cap_mod_intax, by="term", permu=999)
+RsquareAdj(cap_mod_intax)
+
+plot(cap_mod_intax, type="n")
+points(cap_mod_intax, pch = 21, cex = 2, col = boxes[metadata$clusters], bg=boxes[metadata$clusters])
+text(cap_mod_intax, dis="cn")
+#color by taxa
+write.table(ind_tax_aggt ,file="Ind_tax_otu_t.txt",sep="\t")
+write.table(t(as.data.frame(ind_tax_aggt)) ,file="Ind_tax_otu.txt",sep="\t")
+
+Ind_tax_otu_eco<-read.delim("Ind_tax_otu.txt", header=TRUE, sep="\t") #BA = Beaufort/Amundsen
+rownames(Ind_tax_otu_eco)=Ind_tax_otu_eco[,1]
+Ind_tax_otu_eco=Ind_tax_otu_eco[,-1]
+
+eco=c('#d53e4f','#f46d43','#fdae61','#fee08b','#e6f598','#abdda4','#66c2a5','#3288bd')
+plot(cap_mod_intax, type="n")
+points(cap_mod_intax, pch = 21, cex = 2, col = eco[Ind_tax_otu_eco$Ecotype], bg=eco[Ind_tax_otu_eco$Ecotype])
+text(cap_mod_intax, dis="cn")
+
+
+Depth + d15N + Phaeo + ChlA + SC_Porosity + TOC + d13C
+
+#subset metadata
+D_meta<-subset(metadata, grepl("D", metadata$clusters))
+D_depth_desc <- D_meta[with(D_meta, order(-Depth)), ]
+
+
+B_meta<-subset(metadata, grepl("B", metadata$clusters))
+B_depth_desc <- B_meta[with(B_meta, order(-Depth)), ]
+B_meta[with(B_meta, order(-TOC)), ]
+
+write.table(B_meta,file="B_meta.txt",sep="\t")
+
+C_meta<-subset(metadata, grepl("C", metadata$clusters))
+C_depth_desc <- C_meta[with(C_meta, order(-Depth)), ]
+
+A_meta<-subset(metadata, grepl("A", metadata$clusters))
+A_depth_desc <- A_meta[with(A_meta, order(-Depth)), ]
